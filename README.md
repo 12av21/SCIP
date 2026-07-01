@@ -231,9 +231,9 @@ npm run dev
 # 👥 Team
 
 * Adarsh Verma
-* Team Member 2
-* Team Member 3
-* Team Member 4
+* Jashitha 
+* varshaa
+  
 
 ---
 
