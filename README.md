@@ -170,23 +170,18 @@ SCIP/
 
 Dashboard
 
-*(Add screenshot)*
 
 Complaint Submission
 
-*(Add screenshot)*
 
 Analytics Dashboard
 
-*(Add screenshot)*
 
 Community Risk
 
-*(Add screenshot)*
 
 AI Recommendations
 
-*(Add screenshot)*
 
 ---
 
@@ -233,6 +228,7 @@ npm run dev
 * Adarsh Verma
 * Jashitha 
 * varshaa
+* Ananya
   
 
 ---
