@@ -1,58 +1,50 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
+interface CommunityAnalysisData {
+  totalComplaints: number;
+  topCategory: string[];
+  topArea: string[];
+  insights: string[];
+}
+
 export default function CommunityAnalysis() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<CommunityAnalysisData | null>(null);
 
   useEffect(() => {
-    axios
-      .get("/api/community-analysis")
-      .then((res) => setData(res.data));
+    axios.get("/api/community-analysis").then((res) => setData(res.data));
   }, []);
 
-  if (!data) return <div>Loading...</div>;
+  if (!data) return <div className="loading-state">Loading community analysis…</div>;
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">
-        Community Intelligence Report
-      </h1>
+    <>
+      <h1>Community intelligence report</h1>
+      <p>A rolled-up view of what's driving complaint volume right now.</p>
 
-      <div className="bg-white p-6 rounded shadow">
-
-        <p>
-          Total Complaints:
-          {" "}
-          {data.totalComplaints}
-        </p>
-
-        <p>
-          Top Issue:
-          {" "}
-          {data.topCategory?.[0]}
-        </p>
-
-        <p>
-          Most Affected Area:
-          {" "}
-          {data.topArea?.[0]}
-        </p>
-
-        <div className="mt-6">
-          <h2 className="font-bold mb-2">
-            Insights
-          </h2>
-
-          {data.insights.map(
-            (item: string, index: number) => (
-              <p key={index}>
-                • {item}
-              </p>
-            )
-          )}
+      <div className="card section-gap" style={{ padding: 24 }}>
+        <div className="stat-line">
+          <span className="stat-line-label">Total complaints</span>
+          <span className="stat-line-value">{data.totalComplaints}</span>
+        </div>
+        <div className="stat-line">
+          <span className="stat-line-label">Top issue</span>
+          <span className="stat-line-value">{data.topCategory?.[0]}</span>
+        </div>
+        <div className="stat-line">
+          <span className="stat-line-label">Most affected area</span>
+          <span className="stat-line-value">{data.topArea?.[0]}</span>
         </div>
 
+        <h2 style={{ marginTop: 24, marginBottom: 12 }}>Insights</h2>
+        <div className="insight-list">
+          {data.insights.map((item, index) => (
+            <p className="insight-list-item" key={index}>
+              {item}
+            </p>
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

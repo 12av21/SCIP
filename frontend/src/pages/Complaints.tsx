@@ -1,39 +1,30 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import toast from "react-hot-toast";
+import StatusBadge from "../components/StatusBadge";
+import PriorityBadge from "../components/PriorityBadge";
+
 interface Complaint {
-
   id: string;
-
   title: string;
-
   description: string;
-
   category: string;
-
   location: string;
-
   status: string;
-
   createdAt: string;
-
   priority: {
     score: number;
     level: string;
   };
-
 }
 
+const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
+
 export default function Complaints() {
-const [search, setSearch] = useState("");
-
-const [complaints, setComplaints] =
-  useState<Complaint[]>([]);
-
-const [categoryFilter, setCategoryFilter] =
-  useState("All");
-
-const [statusFilter, setStatusFilter] =
-  useState("All");
+  const [search, setSearch] = useState("");
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
 
   useEffect(() => {
     fetchComplaints();
@@ -45,194 +36,115 @@ const [statusFilter, setStatusFilter] =
       setComplaints(response.data);
     } catch (error) {
       console.error(error);
+      toast.error("Couldn't load complaints.");
     }
   };
-const updateStatus = async (
-  id: string,
-  status: string
-) => {
-  try {
-    await axios.patch(
-      `/api/complaints/${id}/status`,
-      { status }
-    );
 
-    fetchComplaints();
-  } catch (error) {
-    console.error(error);
-  }
-};
-const filteredComplaints =
-  complaints.filter((item) => {
+  const updateStatus = async (id: string, status: string) => {
+    try {
+      await axios.patch(`/api/complaints/${id}/status`, { status });
+      toast.success(`Marked as ${status}`);
+      fetchComplaints();
+    } catch (error) {
+      console.error(error);
+      toast.error("Couldn't update status.");
+    }
+  };
 
+  const filteredComplaints = complaints.filter((item) => {
     const matchesSearch =
-      item.title
-        .toLowerCase()
-        .includes(search.toLowerCase()) ||
-
-      item.location
-        .toLowerCase()
-        .includes(search.toLowerCase());
-
-    const matchesCategory =
-      categoryFilter === "All" ||
-      item.category === categoryFilter;
-
-    const matchesStatus =
-      statusFilter === "All" ||
-      item.status === statusFilter;
-
-    return (
-      matchesSearch &&
-      matchesCategory &&
-      matchesStatus
-    );
-
+      item.title.toLowerCase().includes(search.toLowerCase()) ||
+      item.location.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = categoryFilter === "All" || item.category === categoryFilter;
+    const matchesStatus = statusFilter === "All" || item.status === statusFilter;
+    return matchesSearch && matchesCategory && matchesStatus;
   });
- return (
-  <div className="p-6">
-    <h1 className="text-3xl font-bold mb-6">
-      Community Complaints
-    </h1>
 
-<div className="flex gap-4 mb-6 flex-wrap">
+  return (
+    <>
+      <h1>Community complaints</h1>
+      <p>{filteredComplaints.length} of {complaints.length} cases shown</p>
 
-<input
-placeholder="Search complaints..."
-value={search}
-onChange={(e)=>
-setSearch(e.target.value)
-}
-className="border rounded-lg px-4 py-2 w-80"
-/>
+      <div className="toolbar section-gap">
+        <input
+          placeholder="Search by title or area…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="field"
+          style={{ width: 280 }}
+        />
 
-<select
-value={categoryFilter}
-onChange={(e)=>
-setCategoryFilter(
-e.target.value
-)
-}
-className="border rounded-lg px-4 py-2"
->
-
-<option>All</option>
-
-<option>Water</option>
-
-<option>Electricity</option>
-
-<option>Road</option>
-
-<option>Waste</option>
-
-<option>Health</option>
-
-</select>
-
-<select
-value={statusFilter}
-onChange={(e)=>
-setStatusFilter(
-e.target.value
-)
-}
-className="border rounded-lg px-4 py-2"
->
-
-<option>All</option>
-
-<option>Pending</option>
-
-<option>In Progress</option>
-
-<option>Resolved</option>
-
-</select>
-
-</div>
-    <div className="space-y-4">
-      {
-      filteredComplaints.map((complaint: Complaint) => (
-        <div
-          key={complaint.id}
-          className="bg-white rounded-xl shadow p-5"
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="field"
         >
-          <h2 className="text-xl font-bold">
-            {complaint.title}
-          </h2>
+          <option>All</option>
+          <option>Water</option>
+          <option>Electricity</option>
+          <option>Road</option>
+          <option>Waste</option>
+          <option>Health</option>
+        </select>
 
-          <p className="mt-2">
-            {complaint.description}
-          </p>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="field"
+        >
+          <option>All</option>
+          <option>Pending</option>
+          <option>In Progress</option>
+          <option>Resolved</option>
+        </select>
+      </div>
 
-          <div className="flex gap-3 mt-4">
-            <span className="bg-blue-100 px-3 py-1 rounded">
-              {complaint.category}
+      <div className="form-stack">
+        {filteredComplaints.map((complaint) => (
+          <div key={complaint.id} className="stamp-card" style={{ padding: 22 }}>
+            <span className="stamp-id">
+              CASE {complaint.id.slice(0, 8).toUpperCase()} · {new Date(complaint.createdAt).toLocaleDateString()}
             </span>
 
-            <span className="bg-green-100 px-3 py-1 rounded">
-              {complaint.location}
-            </span>
+            <div style={{ marginTop: 22 }}>
+              <h2 style={{ fontSize: 19 }}>{complaint.title}</h2>
+              <p style={{ marginTop: 8 }}>{complaint.description}</p>
 
-            <span className="bg-yellow-100 px-3 py-1 rounded">
-              {complaint.status}
-            </span>
+              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+                <span className="tag">{complaint.category}</span>
+                <span className="tag">{complaint.location}</span>
+                <StatusBadge status={complaint.status} />
+                <PriorityBadge level={complaint.priority.level} score={complaint.priority.score} />
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+                {STATUS_OPTIONS.map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => updateStatus(complaint.id, status)}
+                    className={
+                      "btn-status" +
+                      (complaint.status === status
+                        ? status === "Pending"
+                          ? " is-active-pending"
+                          : status === "In Progress"
+                          ? " is-active-progress"
+                          : " is-active-resolved"
+                        : "")
+                    }
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
+        ))}
 
-  <div className="mt-4">
-  <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full">
-    Priority:
-    {" "}
-    {complaint.priority.level}
-    {" "}
-    ({complaint.priority.score})
-
-    </span>
-    </div>
-          <div className="mt-5 flex gap-3">
-
-            <button
-              onClick={() =>
-                updateStatus(
-                  complaint.id,
-                  "Pending"
-                )
-              }
-              className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 rounded"
-            >
-              Pending
-            </button>
-
-            <button
-              onClick={() =>
-                updateStatus(
-                  complaint.id,
-                  "In Progress"
-                )
-              }
-              className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded"
-            >
-              In Progress
-            </button>
-
-            <button
-              onClick={() =>
-                updateStatus(
-                  complaint.id,
-                  "Resolved"
-                )
-              }
-              className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded"
-            >
-              Resolve
-            </button>
-          </div>
-
-        </div>
-        
-      ))}
-    </div>
-  </div>
-);
+        {filteredComplaints.length === 0 && (
+          <p className="loading-state">No complaints match these filters.</p>
+        )}
+      </div>
+    </>
+  );
 }

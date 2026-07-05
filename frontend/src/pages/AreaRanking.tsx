@@ -1,54 +1,36 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
+interface AreaRisk {
+  area: string;
+  riskScore: number;
+}
+
 export default function AreaRanking() {
-  const [areas, setAreas] =
-    useState<any[]>([]);
+  const [areas, setAreas] = useState<AreaRisk[]>([]);
 
   useEffect(() => {
     axios
       .get("/api/risk")
-      .then((res) =>
-        setAreas(
-          [...res.data].sort(
-            (a, b) =>
-              b.riskScore -
-              a.riskScore
-          )
-        )
-      );
+      .then((res) => setAreas([...res.data].sort((a, b) => b.riskScore - a.riskScore)));
   }, []);
 
   return (
-    <div className="p-6">
+    <>
+      <h1>Area rankings</h1>
+      <p>Areas ordered by composite risk score, highest first.</p>
 
-      <h1 className="text-3xl font-bold mb-6">
-        Area Rankings
-      </h1>
+      <div className="card section-gap" style={{ padding: 22 }}>
+        {areas.map((area, index) => (
+          <div key={area.area} className="rank-row">
+            <span className="rank-index mono">#{index + 1}</span>
+            <span className="rank-name">{area.area}</span>
+            <span className="rank-score mono">{area.riskScore}</span>
+          </div>
+        ))}
 
-      <div className="bg-white rounded shadow p-6">
-
-        {areas.map(
-          (area, index) => (
-            <div
-              key={area.area}
-              className="flex justify-between border-b py-3"
-            >
-              <span>
-                #{index + 1}
-                {" "}
-                {area.area}
-              </span>
-
-              <span>
-                {area.riskScore}
-              </span>
-            </div>
-          )
-        )}
-
+        {areas.length === 0 && <p className="loading-state">No area risk data yet.</p>}
       </div>
-
-    </div>
+    </>
   );
 }

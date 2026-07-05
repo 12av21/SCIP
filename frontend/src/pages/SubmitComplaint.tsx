@@ -1,7 +1,9 @@
 import { useState } from "react";
 import axios from "axios";
+import toast from "react-hot-toast";
 
 export default function SubmitComplaint() {
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -12,48 +14,37 @@ export default function SubmitComplaint() {
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
+    setSubmitting(true);
     try {
-    await axios.post(
-  "/api/complaints",
-  formData
-);
-
-      alert("Complaint submitted successfully");
-
-      setFormData({
-        title: "",
-        description: "",
-        category: "",
-        location: "",
-      });
+      await axios.post("/api/complaints", formData);
+      toast.success("Complaint filed successfully.");
+      setFormData({ title: "", description: "", category: "", location: "" });
     } catch (error) {
       console.error(error);
-      alert("Submission failed");
+      toast.error("Submission failed. Try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto mt-10 bg-white p-6 rounded-lg shadow">
-      <h1 className="text-2xl font-bold mb-6">
-        Submit Complaint
-      </h1>
+    <div className="stamp-card" style={{ maxWidth: 560, margin: "0 auto", padding: 28 }}>
+      <span className="stamp-id">New case filing</span>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <h1 style={{ fontSize: 24, marginTop: 22 }}>Submit a complaint</h1>
+
+      <form onSubmit={handleSubmit} className="form-stack" style={{ marginTop: 16 }}>
         <input
           name="title"
-          placeholder="Complaint Title"
+          placeholder="Complaint title"
           value={formData.title}
           onChange={handleChange}
-          className="w-full border p-3 rounded"
+          className="field"
           required
         />
 
@@ -62,7 +53,7 @@ export default function SubmitComplaint() {
           placeholder="Describe the issue"
           value={formData.description}
           onChange={handleChange}
-          className="w-full border p-3 rounded"
+          className="field"
           rows={5}
           required
         />
@@ -71,10 +62,10 @@ export default function SubmitComplaint() {
           name="category"
           value={formData.category}
           onChange={handleChange}
-          className="w-full border p-3 rounded"
+          className="field"
           required
         >
-          <option value="">Select Category</option>
+          <option value="">Select category</option>
           <option value="Water">Water</option>
           <option value="Electricity">Electricity</option>
           <option value="Road">Road</option>
@@ -87,15 +78,12 @@ export default function SubmitComplaint() {
           placeholder="Location"
           value={formData.location}
           onChange={handleChange}
-          className="w-full border p-3 rounded"
+          className="field"
           required
         />
 
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-6 py-3 rounded"
-        >
-          Submit Complaint
+        <button type="submit" disabled={submitting} className="btn btn-primary">
+          {submitting ? "Submitting…" : "Submit complaint"}
         </button>
       </form>
     </div>
