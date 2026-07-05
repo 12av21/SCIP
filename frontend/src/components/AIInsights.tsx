@@ -1,64 +1,36 @@
-import {
-  Sparkles,
-  TriangleAlert,
-  Droplets,
-  TrendingUp,
-} from "lucide-react";
+import { Sparkles, TriangleAlert, Droplets, TrendingUp } from "lucide-react";
+import "./AIInsights.css";
 
 interface Props {
   insights: string[];
 }
 
-export default function AIInsights({
-  insights,
-}: Props) {
+const ROWS = [
+  { Icon: TriangleAlert, tone: "alert" },
+  { Icon: Droplets, tone: "brass" },
+  { Icon: TrendingUp, tone: "good" },
+];
+
+export default function AIInsights({ insights }: Props) {
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
-
-      <div className="flex items-center gap-3 mb-6">
-
-        <Sparkles className="text-blue-600" />
-
-        <h2 className="text-xl font-bold">
-          AI Insights
-        </h2>
-
+    <div className="card ai-insights">
+      <div className="ai-insights-head">
+        <Sparkles size={18} className="ai-insights-mark" />
+        <h2>AI insights</h2>
       </div>
 
-      <div className="space-y-4">
-
-        <div className="flex gap-3">
-
-          <TriangleAlert className="text-red-500 mt-1" />
-
-          <p>
-            {insights[0]}
-          </p>
-
-        </div>
-
-        <div className="flex gap-3">
-
-          <Droplets className="text-blue-500 mt-1" />
-
-          <p>
-            {insights[1]}
-          </p>
-
-        </div>
-
-        <div className="flex gap-3">
-
-          <TrendingUp className="text-green-600 mt-1" />
-
-          <p>
-            {insights[2]}
-          </p>
-
-        </div>
-
+      <div className="ai-insights-list">
+        {ROWS.map(({ Icon, tone }, i) =>
+          insights[i] ? (
+            <div className="ai-insight-row" key={i}>
+              <span className={`ai-insight-icon ai-insight-${tone}`}>
+                <Icon size={16} strokeWidth={2} />
+              </span>
+              <p>{insights[i]}</p>
+            </div>
+          ) : null
+        )}
       </div>
-
     </div>
   );
 }

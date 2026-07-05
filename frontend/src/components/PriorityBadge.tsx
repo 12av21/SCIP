@@ -3,31 +3,17 @@ interface Props {
   score: number;
 }
 
-export default function PriorityBadge({
-  level,
-  score,
-}: Props) {
+const LEVEL_CLASS: Record<string, string> = {
+  Low: "badge badge-resolved",
+  Medium: "badge badge-pending",
+  High: "badge badge-risk",
+  Critical: "badge badge-critical",
+};
 
-  let color =
-    "bg-green-100 text-green-700";
-
-  if (level === "Medium")
-    color =
-      "bg-yellow-100 text-yellow-700";
-
-  if (level === "High")
-    color =
-      "bg-orange-100 text-orange-700";
-
-  if (level === "Critical")
-    color =
-      "bg-red-100 text-red-700";
-
+export default function PriorityBadge({ level, score }: Props) {
   return (
-    <span
-      className={`px-3 py-1 rounded-full font-semibold ${color}`}
-    >
-      {level} ({score})
+    <span className={LEVEL_CLASS[level] ?? "badge badge-progress"}>
+      {level} <span className="mono">({score})</span>
     </span>
   );
 }

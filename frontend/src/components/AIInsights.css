@@ -1,0 +1,63 @@
+.ai-insights {
+  padding: 22px;
+}
+
+.ai-insights-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.ai-insights-mark {
+  color: var(--brass);
+}
+
+.ai-insights-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.ai-insights-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ai-insight-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ai-insight-row p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.5;
+  padding-top: 3px;
+}
+
+.ai-insight-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.ai-insight-alert {
+  background: var(--alert-bg);
+  color: var(--alert);
+}
+
+.ai-insight-brass {
+  background: var(--brass-bg);
+  color: var(--brass);
+}
+
+.ai-insight-good {
+  background: var(--good-bg);
+  color: var(--good);
+}
