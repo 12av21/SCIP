@@ -14,6 +14,10 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   let redirectPath: string | null = null;
   let toastMessage: string | null = null;
 
+  console.log("ProtectedRoute state:", { isAuthenticated, user, loading, allowedRoles });
+  if (user) {
+    console.log("User role:", user.role);
+  }
   // Always call useEffect first, even if logic inside is conditional
   // This ensures the order of hooks remains consistent across renders.
   useEffect(() => {
@@ -24,7 +28,7 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
 
   // While authentication status is being determined, show nothing or a loading spinner
   if (loading) {
-    return null; // Or a loading spinner component
+    return <div>Loading authentication status...</div>; // Show a loading message or spinner
   }
 
   if (!isAuthenticated) { // If not authenticated, redirect to the login page
