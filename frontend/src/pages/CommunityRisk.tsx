@@ -19,6 +19,21 @@ const LEVEL_CLASS: Record<string, string> = {
   Critical: "badge badge-critical",
 };
 
+interface AreaRiskRow {
+  area: string;
+  complaints: number;
+  pending: number;
+  riskScore: number;
+  level: string;
+}
+
+const LEVEL_CLASS: Record<string, string> = {
+  Low: "badge badge-resolved",
+  Medium: "badge badge-pending",
+  High: "badge badge-risk",
+  Critical: "badge badge-critical",
+};
+
 export default function CommunityRisk() {
   const [data, setData] = useState<AreaRiskRow[]>([]);
   const [loading, setLoading] = useState(true);

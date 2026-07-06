@@ -59,7 +59,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     logout();
     navigate("/login");
   };
-
   return (
     <div className="shell">
       <aside className="shell-sidebar">

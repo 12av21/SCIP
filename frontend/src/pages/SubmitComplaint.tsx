@@ -56,6 +56,7 @@ export default function SubmitComplaint() {
     } catch (error) {
       toast.error("Failed to submit case.");
     }
+    }
   };
 
   return (

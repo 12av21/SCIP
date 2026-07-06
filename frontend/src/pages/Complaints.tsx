@@ -48,6 +48,7 @@ export default function Complaints() {
     } finally {
       setLoading(false);
     }
+    }
   };
 
   const updateStatus = async (id: string, status: string) => {
@@ -154,6 +155,7 @@ export default function Complaints() {
                 )}
 
                 {isAdmin && STATUS_OPTIONS.map((status) => (
+
                   <button
                     key={status}
                     onClick={() => updateStatus(complaint.id, status)}
@@ -177,6 +179,8 @@ export default function Complaints() {
         ))}
 
         {!loading && filteredComplaints.length === 0 && (
+          <p className="loading-state">No complaints match these filters.</p>
+        )}
           <p className="loading-state">No complaints match these filters.</p>
         )}
       </div>

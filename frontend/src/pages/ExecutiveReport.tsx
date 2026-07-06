@@ -10,6 +10,13 @@ interface ExecutiveReportData {
   insights: string[];
 }
 
+interface ExecutiveReportData {
+  totalComplaints: number;
+  topCategory: string[];
+  topArea: string[];
+  insights: string[];
+}
+
 export default function ExecutiveReport() {
   const [data, setData] = useState<ExecutiveReportData | null>(null);
 
