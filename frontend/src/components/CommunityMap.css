@@ -1,0 +1,39 @@
+.community-map {
+  padding: 22px;
+}
+
+.community-map-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.community-map-head h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.community-map-head p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--steel);
+  margin: 0;
+}
+
+.community-map-frame {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.community-map-frame .leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.community-map-frame .leaflet-popup-content {
+  margin: 10px 14px;
+  line-height: 1.5;
+}

@@ -5,9 +5,9 @@ import './index.css'
 import App from './App.tsx'
 import { Toaster } from "react-hot-toast";
 
-<Toaster />
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <Toaster position="top-right" toastOptions={{ duration: 3500 }} />
     <App />
   </StrictMode>,
 )

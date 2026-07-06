@@ -1,0 +1,100 @@
+/* Landing Page Specific Styles */
+:root {
+  --paper: #fdfcf8;
+  --ink: #10182a;
+  --brass: #9c6b1f;
+  --brass-bg: rgba(156, 107, 31, 0.08);
+  --brass-border: rgba(156, 107, 31, 0.2);
+  --font-display: 'Zilla Slab', serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+.landing-root {
+    font-family: var(--font-body);
+    background-color: var(--paper);
+    color: var(--ink);
+    scroll-behavior: smooth;
+    min-height: 100vh;
+}
+
+.landing-root h1, 
+.landing-root h2, 
+.landing-root h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.landing-grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(var(--ink) 0.5px, transparent 0.5px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse at center, black, transparent 90%);
+    opacity: 0.05;
+    z-index: -1;
+    pointer-events: none;
+}
+
+.gemini-glow {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    filter: blur(120px);
+    mix-blend-mode: multiply;
+    background: radial-gradient(circle, var(--brass-bg), transparent 70%);
+    top: -200px;
+    right: -100px;
+    z-index: -1;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-15px); }
+}
+
+.animate-float {
+    animation: float 6s ease-in-out infinite;
+}
+
+/* Smooth blurring for glassmorphism sections */
+.backdrop-blur {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Refined shadow for the primary CTA */
+.shadow-blue-200 {
+    box-shadow: 0 10px 25px -5px rgba(30, 64, 175, 0.15), 0 8px 10px -6px rgba(30, 64, 175, 0.1);
+}
+
+/* Fix for scroll overflow in some browsers */
+body:has(.landing-root) {
+    overflow-x: hidden;
+}
+
+/* Custom selection color for community feel */
+.landing-root ::selection {
+    background: var(--brass-bg);
+    color: var(--ink);
+}
+
+.landing-tag {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--brass);
+    background: var(--brass-bg);
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--brass-border);
+    display: inline-block;
+    margin-bottom: 16px;
+}

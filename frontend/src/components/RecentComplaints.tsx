@@ -1,54 +1,48 @@
 import StatusBadge from "./StatusBadge";
+import "./RecentComplaints.css";
 
-export default function RecentComplaints({
-  complaints,
-}: any) {
+interface ComplaintRow {
+  id: string;
+  title: string;
+  location: string;
+  status: string;
+}
+
+interface Props {
+  complaints: ComplaintRow[];
+}
+
+export default function RecentComplaints({ complaints }: Props) {
   return (
-    <div className="bg-white rounded-xl shadow p-6">
+    <div className="card recent-complaints">
+      <h2>Recent complaints</h2>
 
-      <h2 className="text-xl font-bold mb-4">
-        Recent Complaints
-      </h2>
-
-      <table className="w-full">
-
+      <table>
         <thead>
           <tr>
+            <th>Case</th>
             <th>Title</th>
             <th>Area</th>
             <th>Status</th>
           </tr>
         </thead>
-
         <tbody>
-
-          {complaints.map(
-            (item: any) => (
-              <tr
-                key={item.id}
-                className="border-t"
-              >
-                <td>{item.title}</td>
-
-                <td>
-                  {item.location}
-                </td>
-
-                <td>
-                  <StatusBadge
-                    status={
-                      item.status
-                    }
-                  />
-                </td>
-              </tr>
-            )
-          )}
-
+          {complaints.map((item) => (
+            <tr key={item.id}>
+              <td className="mono recent-complaints-id">{item.id}</td>
+              <td>{item.title}</td>
+              <td>{item.location}</td>
+              <td>
+                <StatusBadge status={item.status} />
+              </td>
+            </tr>
+          ))}
         </tbody>
-
       </table>
 
+      {complaints.length === 0 && (
+        <p className="recent-complaints-empty">No complaints filed yet.</p>
+      )}
     </div>
   );
 }

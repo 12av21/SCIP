@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import toast from "react-hot-toast";
 
 import {
   PieChart,
@@ -14,105 +15,80 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const COLORS = [
-  "#0088FE",
-  "#00C49F",
-  "#FFBB28",
-  "#FF8042",
-  "#8884D8",
-];
+const COLORS = ["#9c6b1f", "#10182a", "#2f6f5e", "#b4432e", "#667085"];
+
+interface Complaint {
+  category: string;
+}
+
+interface CategoryDatum {
+  name: string;
+  value: number;
+}
 
 export default function Analytics() {
-  const [complaints, setComplaints] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios
-      .get("/api/complaints")
-      .then((res) => setComplaints(res.data));
+    setLoading(true);
+    axios.get("/api/complaints")
+      .then((res) => setComplaints(res.data))
+      .catch(() => toast.error("Analytics data sync failed."))
+      .finally(() => setLoading(false));
   }, []);
 
   const categoryMap: Record<string, number> = {};
-
   complaints.forEach((item) => {
-    categoryMap[item.category] =
-      (categoryMap[item.category] || 0) + 1;
+    categoryMap[item.category] = (categoryMap[item.category] || 0) + 1;
   });
 
-  const categoryData = Object.entries(
-    categoryMap
-  ).map(([name, value]) => ({
+  const categoryData: CategoryDatum[] = Object.entries(categoryMap).map(([name, value]) => ({
     name,
     value,
   }));
 
   return (
-    <div className="p-6">
+    <>
+      <h1>Analytics</h1>
+      <p>How filed complaints break down by category.</p>
 
-      <h1 className="text-3xl font-bold mb-6">
-        Analytics Dashboard
-      </h1>
+      <div className="grid-2 section-gap">
+        <div className="card" style={{ padding: 22 }}>
+          <h2 style={{ fontSize: 17, marginBottom: 16 }}>Complaints by category</h2>
 
-      <div className="grid md:grid-cols-2 gap-8">
-
-        <div className="bg-white p-6 rounded shadow">
-
-          <h2 className="font-bold mb-4">
-            Complaints by Category
-          </h2>
-
-          <PieChart width={400} height={300}>
-            <Pie
-              data={categoryData}
-              dataKey="value"
-              outerRadius={100}
-            >
-              {categoryData.map(
-                (_, index) => (
-                  <Cell
-                    key={index}
-                    fill={
-                      COLORS[
-                        index %
-                          COLORS.length
-                      ]
-                    }
-                  />
-                )
-              )}
-            </Pie>
-
-            <Tooltip />
-          </PieChart>
-
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={100}>
+                {categoryData.map((_, index) => (
+                  <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{ borderRadius: 8, border: "1px solid #e1dfd8", fontSize: 13 }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
 
-        <div className="bg-white p-6 rounded shadow">
+        <div className="card" style={{ padding: 22 }}>
+          <h2 style={{ fontSize: 17, marginBottom: 16 }}>Category comparison</h2>
 
-          <h2 className="font-bold mb-4">
-            Category Comparison
-          </h2>
-
-          <ResponsiveContainer
-            width="100%"
-            height={300}
-          >
+          <ResponsiveContainer width="100%" height={300}>
             <BarChart data={categoryData}>
-              <CartesianGrid strokeDasharray="3 3" />
-
-              <XAxis dataKey="name" />
-
-              <YAxis />
-
-              <Tooltip />
-
-              <Bar dataKey="value" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e1dfd8" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: "#667085", fontSize: 12 }} tickLine={false} />
+              <YAxis tick={{ fill: "#667085", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip
+                contentStyle={{ borderRadius: 8, border: "1px solid #e1dfd8", fontSize: 13 }}
+              />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#9c6b1f" maxBarSize={44} />
             </BarChart>
           </ResponsiveContainer>
-
         </div>
-
       </div>
 
-    </div>
+      {!loading && categoryData.length === 0 && <p className="loading-state">No complaint data yet.</p>}
+    </>
   );
 }

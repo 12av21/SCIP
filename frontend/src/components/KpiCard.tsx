@@ -1,62 +1,52 @@
 import { motion } from "framer-motion";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight } from "lucide-react";
+import type { ReactNode } from "react";
+import "./KpiCard.css";
 
 interface Props {
   title: string;
   value: string | number;
-  icon?: React.ReactNode;
-  color?: string;
+  icon?: ReactNode;
+  tone?: "brass" | "alert" | "good" | "ink";
   change?: string;
+  trend?: "up" | "down";
 }
+
+const TONE_CLASS: Record<string, string> = {
+  brass: "kpi-icon kpi-icon-brass",
+  alert: "kpi-icon kpi-icon-alert",
+  good: "kpi-icon kpi-icon-good",
+  ink: "kpi-icon kpi-icon-ink",
+};
 
 export default function KpiCard({
   title,
   value,
   icon,
-  color = "text-blue-600",
+  tone = "brass",
   change = "+12%",
+  trend = "up",
 }: Props) {
+  const Trend = trend === "up" ? ArrowUpRight : ArrowDownRight;
+
   return (
     <motion.div
-      whileHover={{
-        y: -5,
-        scale: 1.02,
-      }}
-      transition={{
-        duration: 0.2,
-      }}
-      className="bg-white rounded-2xl shadow-md hover:shadow-xl transition-all p-6 border border-slate-200"
+      whileHover={{ y: -3 }}
+      transition={{ duration: 0.15 }}
+      className="card kpi-card"
     >
-      <div className="flex justify-between items-center">
-
+      <div className="kpi-top">
         <div>
-
-          <p className="text-slate-500 text-sm font-medium">
-            {title}
-          </p>
-
-          <h2 className={`text-5xl font-bold mt-3 ${color}`}>
-            {value}
-          </h2>
-
+          <p className="kpi-title mono">{title}</p>
+          <h2 className="kpi-value">{value}</h2>
         </div>
-
-        <div className="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center">
-          {icon}
-        </div>
-
+        {icon && <div className={TONE_CLASS[tone]}>{icon}</div>}
       </div>
 
-      <div className="flex items-center mt-6 text-green-600 text-sm">
-
-        <ArrowUpRight size={16} />
-
-        <span className="ml-1">
-          {change} from last week
-        </span>
-
+      <div className={`kpi-trend kpi-trend-${trend}`}>
+        <Trend size={15} strokeWidth={2} />
+        <span>{change} from last week</span>
       </div>
-
     </motion.div>
   );
 }

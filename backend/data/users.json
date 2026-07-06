@@ -1,0 +1,18 @@
+[
+  {
+    "id": "admin-seed-1",
+    "name": "Super User",
+    "email": "admin@scip.gov",
+    "passwordHash": "$2b$10$eLp3eg.U66L9GYPxir8i3.2xoAXI48j2XQT8340XtbuvU63gLtPiS",
+    "role": "admin",
+    "createdAt": "2026-07-06T04:52:52.046Z"
+  },
+  {
+    "id": "1783330041025",
+    "name": "Jashitha",
+    "email": "jashitha77@gmail.com",
+    "passwordHash": "$2b$10$0kf4h9/QHg6fYnma6YEOHuKmeThnnWlP061Z0LKRvtCh0/HCPLDCe",
+    "role": "citizen",
+    "createdAt": "2026-07-06T09:27:21.025Z"
+  }
+]
