@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -9,30 +9,38 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   const { isAuthenticated, user, loading } = useAuth();
+  
+  // Determine redirection path and message
+  let redirectPath: string | null = null;
+  let toastMessage: string | null = null;
+
+  // Always call useEffect first, even if logic inside is conditional
+  // This ensures the order of hooks remains consistent across renders.
+  useEffect(() => {
+    if (toastMessage) {
+      toast.error(toastMessage);
+    }
+  }, [toastMessage]);
 
   // While authentication status is being determined, show nothing or a loading spinner
   if (loading) {
     return null; // Or a loading spinner component
   }
 
-  // If not authenticated, redirect to the login page
-  if (!isAuthenticated) {
-    toast.error("You need to log in to access this page.");
-    return <Navigate to="/login" replace />;
-  }
-
-  // If roles are specified, check if the user has one of the allowed roles
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    // If the user is authenticated but doesn't have the required role,
-    // redirect them to a more appropriate page or an unauthorized access page.
-    // For now, we'll redirect admins to their dashboard and citizens to theirs.
+  if (!isAuthenticated) { // If not authenticated, redirect to the login page
+    redirectPath = "/login";
+    toastMessage = "You need to log in to access this page.";
+  } else if (allowedRoles && user && !allowedRoles.includes(user.role)) { // If roles are specified, check if the user has one of the allowed roles
+    toastMessage = "You do not have permission to view this page.";
     if (user.role === 'admin' || user.role === 'super_admin') {
-      toast.error("You do not have permission to view this page.");
-      return <Navigate to="/admin" replace />;
+      redirectPath = "/admin";
     } else {
-      toast.error("You do not have permission to view this page.");
-      return <Navigate to="/citizen" replace />;
+      redirectPath = "/citizen";
     }
+  }
+  // Perform redirection if needed
+  if (redirectPath) {
+    return <Navigate to={redirectPath} replace />;
   }
 
   // If authenticated and has the required role (or no roles are specified), render the child routes

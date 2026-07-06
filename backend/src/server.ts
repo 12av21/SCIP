@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
+console.log("MONGODB_URI:", process.env.MONGODB_URI);
+console.log("GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "Loaded" : "Missing");
 import express from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes";
@@ -14,6 +16,7 @@ import userRoutes from "./routes/user.routes";
 import userSettingsRoutes from "./routes/userSettings.routes";
 import { seedAdminIfMissing } from "./services/auth.service";
 import { errorHandler } from "./middleware/error.middleware";
+import connectDB from "./config/db";
 
 const app = express();
 
@@ -41,9 +44,20 @@ app.get("/", (_req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
+const startServer = async () => {
+  try {
+    await connectDB();
 
-seedAdminIfMissing().finally(() => {
-  app.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-});
+    await seedAdminIfMissing();
+
+    app.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
+};
+
+startServer();
