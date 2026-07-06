@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { register, login, me, updateProfile, sendVerificationEmail, verifyEmail, forgotPassword, resetPassword } from "../controllers/auth.controller";
-import { requireAuth } from "../middleware/auth.middleware";
+import { requireAuth } from "../middleware/auth.middleware"; // Assuming you have an auth.middleware.ts
 
 const router = Router();
 
