@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import { FileText, ShieldCheck, TrendingDown } from "lucide-react";
 import { motion } from "framer-motion";
-
-interface ExecutiveReportData {
-  totalComplaints: number;
-  topCategory: string[];
-  topArea: string[];
-  insights: string[];
-}
 
 interface ExecutiveReportData {
   totalComplaints: number;
@@ -21,7 +14,7 @@ export default function ExecutiveReport() {
   const [data, setData] = useState<ExecutiveReportData | null>(null);
 
   useEffect(() => {
-    axios.get("/api/community-analysis").then((res) => setData(res.data));
+    api.get("/community-analysis").then((res) => setData(res.data));
   }, []);
 
   if (!data) return <div className="loading-state">Loading report…</div>;

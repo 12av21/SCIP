@@ -1,4 +1,4 @@
-import { NavLink, useNavigate, Link } from "react-router-dom";
+import { NavLink, useNavigate, Link, Outlet } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import {
@@ -10,13 +10,18 @@ import {
   User as UserIcon,
   CheckCircle2,
   Clock,
+  Settings as SettingsIcon,
   ArrowRight
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 import "./Layout.css";
 
-export default function CitizenLayout({ children }: { children: ReactNode }) {
+interface CitizenLayoutProps {
+  children?: ReactNode;
+}
+
+export default function CitizenLayout({ children }: CitizenLayoutProps) {
   const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -67,8 +72,8 @@ export default function CitizenLayout({ children }: { children: ReactNode }) {
 
           <div className="mt-auto p-4 border-t border-slate-100/10">
              <div className="flex items-center gap-3 px-2 py-3 rounded-xl bg-blue-600/10">
-               <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">{user?.full_name?.[0]}</div>
-               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">{user?.full_name}</div>
+               <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">{user?.name?.[0]}</div>
+               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">{user?.name}</div>
              </div>
           </div>
         </nav>
@@ -116,7 +121,12 @@ export default function CitizenLayout({ children }: { children: ReactNode }) {
               )}
             </div>
             
-            <button className="p-2 text-slate-400 hover:text-blue-600 transition-colors"><UserIcon size={18} /></button>
+            <Link to="/citizen/profile" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Profile">
+              <UserIcon size={18} />
+            </Link>
+            <Link to="/citizen/settings" className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Settings">
+              <SettingsIcon size={18} />
+            </Link>
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:bg-red-600 hover:text-white"

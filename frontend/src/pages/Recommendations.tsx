@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 
 interface RecommendationsData {
   recommendations: string[];
@@ -7,9 +7,9 @@ interface RecommendationsData {
 
 export default function Recommendations() {
   const [data, setData] = useState<RecommendationsData | null>(null);
-
-  useEffect(() => {
-    axios.get("/api/recommendations").then((res) => setData(res.data));
+  
+  useEffect(() => { //
+    api.get("/recommendations").then((res) => setData(res.data));
   }, []);
 
   if (!data) return <div className="loading-state">Loading recommendations…</div>;

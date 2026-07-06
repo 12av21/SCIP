@@ -10,6 +10,8 @@ import recommendationRoutes from "./routes/recommendation.routes";
 import communityAnalysisRoutes from "./routes/communityAnalysis.routes";
 import geminiAnalysisRoutes from "./routes/geminiAnalysis.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
+import userRoutes from "./routes/user.routes";
+import userSettingsRoutes from "./routes/userSettings.routes";
 import { seedAdminIfMissing } from "./services/auth.service";
 import { errorHandler } from "./middleware/error.middleware";
 
@@ -28,6 +30,8 @@ app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/complaints", complaintRoutes);
 app.use("/api/risk", riskRoutes);
+app.use("/api/admin/users", userRoutes);
+app.use("/api/user/settings", userSettingsRoutes);
 
 app.get("/", (_req, res) => {
   res.send("SCIP Backend Running");

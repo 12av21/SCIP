@@ -39,7 +39,7 @@ export class AuthError extends Error {
   }
 }
 
-export async function registerUser(name: string, email: string, password: string) {
+export async function registerUser(name: string, email: string, password: string, role: string = "citizen") {
   if (!name || !email || !password) {
     throw new AuthError("Name, email, and password are all required.", 400);
   }
@@ -60,7 +60,7 @@ export async function registerUser(name: string, email: string, password: string
     name: name.trim(),
     email: normalizedEmail,
     passwordHash,
-    role: "citizen", // self-registration is always a citizen account
+    role: role as UserRole, // Allow role to be specified for admin creation
     createdAt: new Date().toISOString(),
   };
 
@@ -97,6 +97,77 @@ export async function getUserById(id: string) {
   const users = await getUsers();
   const user = users.find((u) => u.id === id);
   return user ? toSafeUser(user) : null;
+}
+
+export async function updateUser(id: string, updates: { name?: string; email?: string }) {
+  const users = await getUsers();
+  const userIndex = users.findIndex((u) => u.id === id);
+  
+  if (userIndex === -1) {
+    return null;
+  }
+
+  const user = users[userIndex];
+  
+  if (updates.name) {
+    user.name = updates.name.trim();
+  }
+  
+  if (updates.email) {
+    const normalizedEmail = updates.email.trim().toLowerCase();
+    // Check if email is already taken by another user
+    if (users.some((u) => u.email === normalizedEmail && u.id !== id)) {
+      throw new AuthError("An account with this email already exists.", 409);
+    }
+    user.email = normalizedEmail;
+  }
+
+  users[userIndex] = user;
+  await saveUsers(users);
+
+  return toSafeUser(user);
+}
+
+export async function getAllUsers() {
+  const users = await getUsers();
+  return users.map(toSafeUser);
+}
+
+export async function updateUserRole(id: string, role: UserRole) {
+  const users = await getUsers();
+  const userIndex = users.findIndex((u) => u.id === id);
+  
+  if (userIndex === -1) {
+    return null;
+  }
+
+  users[userIndex].role = role;
+  await saveUsers(users);
+
+  return toSafeUser(users[userIndex]);
+}
+
+export async function deleteUser(id: string, currentUserId: string, currentUserRole: UserRole) {
+  const users = await getUsers();
+  const userIndex = users.findIndex((u) => u.id === id);
+  
+  if (userIndex === -1) {
+    throw new AuthError("User not found.", 404);
+  }
+
+  // Prevent self-deletion
+  if (id === currentUserId) {
+    throw new AuthError("You cannot delete your own account.", 403);
+  }
+
+  // Only super_admin can delete admins
+  const userToDelete = users[userIndex];
+  if (userToDelete.role === 'admin' && currentUserRole !== 'super_admin') {
+    throw new AuthError("Only super admins can delete admin accounts.", 403);
+  }
+
+  users.splice(userIndex, 1);
+  await saveUsers(users);
 }
 
 // Ensures a demo admin account always exists so the admin portal is

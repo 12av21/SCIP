@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { TrendingUp, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 
 import PageHeader from "../components/PageHeader";
+import api from "../utils/api"; // Import the centralized API client
 import KpiCard from "../components/KpiCard";
 import AIInsights from "../components/AIInsights";
 import RecentComplaints from "../components/RecentComplaints";
@@ -35,7 +36,7 @@ export default function Dashboard() {
 
   const loadDashboard = async () => {
     try {
-      const res = await axios.get("/api/dashboard");
+      const res = await api.get("/dashboard");
       setDashboard(res.data);
     } catch (err) {
       console.error(err);
@@ -87,10 +88,6 @@ export default function Dashboard() {
           ]}
         />
       </div>
-    </div>
-  );
-}
-
       <div className="section-gap">
         <RecentComplaints complaints={dashboard.recent} />
       </div>

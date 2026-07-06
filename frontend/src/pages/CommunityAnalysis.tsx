@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 
 interface CommunityAnalysisData {
   totalComplaints: number;
@@ -12,7 +12,7 @@ export default function CommunityAnalysis() {
   const [data, setData] = useState<CommunityAnalysisData | null>(null);
 
   useEffect(() => {
-    axios.get("/api/community-analysis").then((res) => setData(res.data));
+    api.get("/community-analysis").then((res) => setData(res.data));
   }, []);
 
   if (!data) return <div className="loading-state">Loading community analysis…</div>;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import toast from "react-hot-toast";
 
 import {
@@ -32,7 +32,7 @@ export default function Analytics() {
 
   useEffect(() => {
     setLoading(true);
-    axios.get("/api/complaints")
+    api.get("/complaints")
       .then((res) => setComplaints(res.data))
       .catch(() => toast.error("Analytics data sync failed."))
       .finally(() => setLoading(false));

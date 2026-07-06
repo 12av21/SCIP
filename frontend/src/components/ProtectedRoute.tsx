@@ -1,46 +1,40 @@
-import React from "react";
-import { Navigate, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import React from 'react';
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import toast from 'react-hot-toast';
 
 interface ProtectedRouteProps {
-  children: React.ReactNode;
-  allowedRole?: "citizen" | "admin";
+  allowedRoles?: ('citizen' | 'admin' | 'super_admin')[];
 }
 
-/**
- * A wrapper component to protect routes based on authentication status and user roles.
- */
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRole }) => {
-  const { isAuthenticated, loading, isAdmin } = useAuth();
-  const location = useLocation();
+export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
+  const { isAuthenticated, user, loading } = useAuth();
 
+  // While authentication status is being determined, show nothing or a loading spinner
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 border-4 border-brass border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs font-mono uppercase tracking-widest opacity-50">Authenticating SCIP Session...</p>
-        </div>
-      </div>
-    );
+    return null; // Or a loading spinner component
   }
 
+  // If not authenticated, redirect to the login page
   if (!isAuthenticated) {
-    // Redirect to login but save the current location to return after login
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    toast.error("You need to log in to access this page.");
+    return <Navigate to="/login" replace />;
   }
 
-  if (allowedRole === "admin" && !isAdmin) {
-    // Admin area requires admin role; bounce citizens back to their own dashboard
-    return <Navigate to="/citizen" replace />;
+  // If roles are specified, check if the user has one of the allowed roles
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    // If the user is authenticated but doesn't have the required role,
+    // redirect them to a more appropriate page or an unauthorized access page.
+    // For now, we'll redirect admins to their dashboard and citizens to theirs.
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      toast.error("You do not have permission to view this page.");
+      return <Navigate to="/admin" replace />;
+    } else {
+      toast.error("You do not have permission to view this page.");
+      return <Navigate to="/citizen" replace />;
+    }
   }
 
-  if (allowedRole === "citizen" && isAdmin) {
-    // Admins have no citizen data of their own; send them to their dashboard instead
-    return <Navigate to="/admin" replace />;
-  }
-
-  return <>{children}</>;
-};
-
-export default ProtectedRoute;
+  // If authenticated and has the required role (or no roles are specified), render the child routes
+  return <Outlet />;
+}

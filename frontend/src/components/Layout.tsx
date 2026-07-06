@@ -1,5 +1,5 @@
-import { NavLink, useNavigate } from "react-router-dom";
-import type { ReactNode } from "react";
+import { NavLink, useNavigate, Outlet } from "react-router-dom";
+// Removed unused import: import type { ReactNode } from "react";
 import {
   LayoutDashboard,
   FilePlus2,
@@ -12,6 +12,8 @@ import {
   Users,
   ClipboardList,
   Hammer,
+  UserCog, // Import for User Management icon
+  Settings as SettingsIcon, // Import for Settings icon
   LogOut,
 } from "lucide-react";
 import "./Layout.css";
@@ -49,9 +51,13 @@ const NAV_SECTIONS = [
     label: "Reporting",
     items: [{ to: "/admin/report", label: "Executive report", icon: FileText }],
   },
+  { label: "Admin", items: [
+    { to: "/admin/users", label: "User Management", icon: UserCog },
+    { to: "/admin/settings", label: "Settings", icon: SettingsIcon }, // New Settings link for admin
+  ] },
 ];
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout() {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
@@ -104,7 +110,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             <span>Logout</span>
           </button>
         </header>
-        <main className="shell-content">{children}</main>
+        {/* The content of the matched child route will be rendered here */}
+        <main className="shell-content"><Outlet /></main>
       </div>
     </div>
   );

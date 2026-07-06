@@ -1,5 +1,5 @@
 import { useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import toast from "react-hot-toast";
 import { Sparkles, Send } from "lucide-react";
 
@@ -12,7 +12,7 @@ export default function AIChat() {
     if (!message.trim()) return;
     setLoading(true);
     try {
-      const response = await axios.post("/api/ai/chat", { message });
+      const response = await api.post("/ai/chat", { message });
       setReply(response.data.reply);
     } catch (error) {
       console.error(error);

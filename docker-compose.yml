@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: scip-frontend
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_BASE_URL=http://backend:5000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - scip-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: scip-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+    env_file:
+      - .env
+    networks:
+      - scip-network
+    restart: unless-stopped
+    volumes:
+      - ./backend/data:/app/data
+
+networks:
+  scip-network:
+    driver: bridge

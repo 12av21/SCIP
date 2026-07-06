@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api"; // Use centralized API client
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
@@ -40,7 +40,7 @@ export default function Complaints() {
   const fetchComplaints = async () => {
     setLoading(true);
     try {
-      const response = await axios.get("/api/complaints");
+      const response = await api.get("/complaints");
       setComplaints(response.data);
     } catch (error) {
       console.error(error);
@@ -48,12 +48,11 @@ export default function Complaints() {
     } finally {
       setLoading(false);
     }
-    }
   };
 
   const updateStatus = async (id: string, status: string) => {
     try {
-      await axios.patch(`/api/complaints/${id}/status`, { status });
+      await api.patch(`/complaints/${id}/status`, { status });
       toast.success(`Marked as ${status}`);
       setComplaints((prev) =>
         prev.map((c) => (c.id === id ? { ...c, status } : c))
@@ -77,6 +76,17 @@ export default function Complaints() {
     return scoreB - scoreA;
   });
 
+  // Helper function for status button classes
+  const getStatusButtonClass = (currentStatus: string, buttonStatus: string) => {
+    let classes = "btn-status";
+    if (currentStatus === buttonStatus) {
+      if (buttonStatus === "Pending") classes += " is-active-pending";
+      else if (buttonStatus === "In Progress") classes += " is-active-progress";
+      else if (buttonStatus === "Resolved") classes += " is-active-resolved";
+    }
+    return classes;
+  };
+
   return (
     <>
       <h1>Community complaints</h1>
@@ -93,8 +103,7 @@ export default function Complaints() {
           placeholder="Search by title or area…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="field"
-          style={{ width: 280 }}
+          className="field w-72" // Use Tailwind class for width
         />
 
         <select
@@ -124,14 +133,14 @@ export default function Complaints() {
 
       <div className="form-stack">
         {filteredComplaints.map((complaint) => (
-          <div key={complaint.id} className="stamp-card" style={{ padding: 22 }}>
+          <div key={complaint.id} className="stamp-card p-5"> {/* Use Tailwind class for padding */}
             <span className="stamp-id">
               CASE {complaint.id.slice(0, 8).toUpperCase()} · {new Date(complaint.createdAt).toLocaleDateString()}
             </span>
 
-            <div style={{ marginTop: 22 }}>
-              <h2 style={{ fontSize: 19 }}>{complaint.title}</h2>
-              <p style={{ marginTop: 8 }}>{complaint.description}</p>
+            <div className="mt-5"> {/* Use Tailwind class for margin-top */}
+              <h2 className="text-lg">{complaint.title}</h2> {/* Use Tailwind class for font-size */}
+              <p className="mt-2">{complaint.description}</p> {/* Use Tailwind class for margin-top */}
 
               <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                 <span className="tag">{complaint.category}</span>
@@ -157,18 +166,9 @@ export default function Complaints() {
                 {isAdmin && STATUS_OPTIONS.map((status) => (
 
                   <button
-                    key={status}
-                    onClick={() => updateStatus(complaint.id, status)}
-                    className={
-                      "btn-status" +
-                      (complaint.status === status
-                        ? status === "Pending"
-                          ? " is-active-pending"
-                          : status === "In Progress"
-                          ? " is-active-progress"
-                          : " is-active-resolved"
-                        : "")
-                    }
+                    key={status} //
+                    onClick={() => updateStatus(complaint.id, status)} //
+                    className={getStatusButtonClass(complaint.status, status)} //
                   >
                     {status}
                   </button>
@@ -181,8 +181,7 @@ export default function Complaints() {
         {!loading && filteredComplaints.length === 0 && (
           <p className="loading-state">No complaints match these filters.</p>
         )}
-          <p className="loading-state">No complaints match these filters.</p>
-        )}
+        
       </div>
     </>
   );

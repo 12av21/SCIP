@@ -8,10 +8,10 @@ import {
   ArrowRight,
   MessageSquare
 } from "lucide-react";
-import { Link } from "react-router-dom";
-import axios from "axios";
+import { Link } from "react-router-dom"; //
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
+import api from "../utils/api"; // Use centralized API client
 
 export default function CitizenDashboard() {
   const [complaints, setComplaints] = useState<any[]>([]);
@@ -19,9 +19,9 @@ export default function CitizenDashboard() {
   const { user } = useAuth();
 
   useEffect(() => {
-    const loadData = async () => {
+    const loadData = async () => { //
       try {
-        const res = await axios.get("/api/complaints");
+        const res = await api.get("/complaints");
         // Filter for "current user" logic - simulating for demo
         setComplaints(res.data);
       } catch (e) {
@@ -40,8 +40,8 @@ export default function CitizenDashboard() {
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       {/* Welcome Section */}
-      <header>
-        <h1 className="text-3xl font-bold text-slate-900">Welcome, {user?.full_name || 'Resident'}</h1>
+      <header> {/* */}
+        <h1 className="text-3xl font-bold text-slate-900">Welcome, {user?.name || 'Resident'}</h1> {/* Use user.name */}
         <p className="text-slate-500 mt-2 font-medium">Manage your community reports and track resolution progress.</p>
       </header>
 

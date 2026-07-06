@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 
 export default function GeminiAnalysis() {
   const [analysis, setAnalysis] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get("/api/gemini-analysis").then((res) => {
+    api.get("/gemini-analysis").then((res) => {
       setAnalysis(res.data.analysis);
       setLoading(false);
     });

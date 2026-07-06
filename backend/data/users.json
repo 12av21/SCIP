@@ -14,5 +14,13 @@
     "passwordHash": "$2b$10$0kf4h9/QHg6fYnma6YEOHuKmeThnnWlP061Z0LKRvtCh0/HCPLDCe",
     "role": "citizen",
     "createdAt": "2026-07-06T09:27:21.025Z"
+  },
+  {
+    "id": "1783335061147",
+    "name": "adarsh verma",
+    "email": "adarshverma7376@gmail.com",
+    "passwordHash": "$2b$10$dqzeFfjH4VxJZt6sSRK5/eieragmnqUKhhaOyRYoBC6CVvG9Xqzre",
+    "role": "citizen",
+    "createdAt": "2026-07-06T10:51:01.149Z"
   }
 ]

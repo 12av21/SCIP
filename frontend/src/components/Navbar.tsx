@@ -1,7 +1,7 @@
 import { Bell, Search, Cpu, LogOut } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import toast from "react-hot-toast";
-import { useAuth } from "../../../backend/AuthContext";
+import { useAuth } from "../context/AuthContext";
 
 interface NavbarProps {
   activePage: string;
@@ -104,29 +104,24 @@ export default function Navbar({ activePage }: NavbarProps) {
           </span>
         </button>
 
-        {/* Profile */}
-
-        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-
+        {/* Profile Link */}
+        <Link to={user?.role === 'admin' || user?.role === 'super_admin' ? '/admin/profile' : '/citizen/profile'} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          {/* Profile Icon/Avatar */}
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 font-bold text-white">
-
-            {user?.full_name?.[0] || 'A'}
-
+            {user?.name?.[0] || 'A'}
           </div>
 
+          {/* User Info */}
           <div className="hidden md:block">
-
-            <p className="text-sm font-semibold">
-              {user?.full_name}
+            <p className="text-sm font-semibold text-slate-900">
+              {user?.name}
             </p>
 
             <p className="text-xs text-slate-500">
               {user?.role === 'super_admin' ? 'Super Admin' : 'Authority Officer'}
             </p>
-
           </div>
-
-        </div>
+        </Link>
 
       </div>
 

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Send, Sparkles, MapPin, FileText } from 'lucide-react';
+import api from '../utils/api'; // Import the centralized API client
+
+const CATEGORIES = ['Water', 'Electricity', 'Road', 'Waste', 'Health'];
 
 export default function SubmitComplaint() {
   const [title, setTitle] = useState('');
@@ -22,7 +24,7 @@ export default function SubmitComplaint() {
     setIsTriaging(true);
     try {
       // Real implementation would call the backend ai_service.py logic
-      const response = await axios.post('/api/ai/triage', { description });
+      const response = await api.post('/ai/triage', { description });
       const { suggestedCategory, suggestedPriority } = response.data;
       
       setCategory(suggestedCategory);
@@ -47,15 +49,14 @@ export default function SubmitComplaint() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await axios.post('/api/complaints', {
+    try { //
+      await api.post('/complaints', {
         title, description, location, category, status: 'Pending'
       });
       toast.success("Case-file created successfully.");
       navigate('/citizen/history');
     } catch (error) {
       toast.error("Failed to submit case.");
-    }
     }
   };
 
@@ -87,8 +88,8 @@ export default function SubmitComplaint() {
           </div>
           <div className="space-y-2">
             <label className="text-xs font-mono uppercase tracking-widest opacity-50">Department</label>
-            <select className="field w-full" value={category} onChange={e => setCategory(e.target.value)}>
-              {['Water', 'Electricity', 'Road', 'Waste', 'Health'].map(c => <option key={c}>{c}</option>)}
+            <select className="field w-full" value={category} onChange={e => setCategory(e.target.value)}> {/* */}
+              {CATEGORIES.map(c => <option key={c}>{c}</option>)} {/* */}
             </select>
             {aiSuggested && <p className="text-[10px] text-brass font-bold animate-pulse">✨ AI Suggested</p>}
           </div>

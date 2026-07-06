@@ -1,24 +1,9 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api";
 import toast from "react-hot-toast";
 import { AlertTriangle, Map } from "lucide-react";
 import { motion } from "framer-motion";
  
-interface AreaRiskRow {
-  area: string;
-  complaints: number;
-  pending: number;
-  riskScore: number;
-  level: string;
-}
-
-const LEVEL_CLASS: Record<string, string> = {
-  Low: "badge badge-resolved",
-  Medium: "badge badge-pending",
-  High: "badge badge-risk",
-  Critical: "badge badge-critical",
-};
-
 interface AreaRiskRow {
   area: string;
   complaints: number;
@@ -40,7 +25,7 @@ export default function CommunityRisk() {
 
   useEffect(() => {
     setLoading(true);
-    axios.get("/api/risk")
+    api.get("/risk")
       .then((res) => setData(res.data))
       .catch(() => toast.error("Risk assessment sync failed."))
       .finally(() => setLoading(false));

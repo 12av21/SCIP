@@ -1,0 +1,45 @@
+# Node
+**/node_modules
+npm-debug.log
+yarn-error.log
+.npm
+
+# Build artifacts
+**/dist
+**/build
+**/.next
+**/.cache
+**/coverage
+
+# Version control
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+.env.local
+
+# Testing
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+README.md
+LICENSE
+**/*.md
+
+# OS
+.DS_Store
+Thumbs.db

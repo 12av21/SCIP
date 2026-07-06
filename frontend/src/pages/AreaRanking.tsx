@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../utils/api"; // Use centralized API client
 
 interface AreaRisk {
   area: string;
@@ -10,8 +10,8 @@ export default function AreaRanking() {
   const [areas, setAreas] = useState<AreaRisk[]>([]);
 
   useEffect(() => {
-    axios
-      .get("/api/risk")
+    api
+      .get("/risk")
       .then((res) => setAreas([...res.data].sort((a, b) => b.riskScore - a.riskScore)));
   }, []);
 
