@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Validate token with backend to ensure it's still active and get full user data
             // This is a crucial step for production-grade auth to prevent using stale tokens.
             const response = await api.get('/auth/me');
-            
-            const fetchedUser: User = response.data;
+            // Backend /api/auth/me returns { user: UserObject }, so access response.data.user
+            const fetchedUser: User = response.data.user;
             setUser(fetchedUser);
           }
         } catch (error) {
@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    setUser(userData);
+    setUser(userData); // userData is already the User object from response.data.user
     return userData;
   };
 
