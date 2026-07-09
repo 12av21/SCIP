@@ -136,7 +136,7 @@ export default function CitizenLayout({ children }: CitizenLayoutProps) {
             </button>
           </div>
         </header>
-        <main className="shell-content bg-slate-50">{children}</main>
+        <main className="shell-content bg-slate-50">{children || <Outlet />}</main>
       </div>
     </div>
   );

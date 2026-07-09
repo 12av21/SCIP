@@ -28,7 +28,7 @@ services:
       - NODE_ENV=production
       - PORT=5000
     env_file:
-      - .env
+      - ./backend/.env
     networks:
       - scip-network
     restart: unless-stopped
