@@ -12,11 +12,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
-
-RUN npm ls typescript
-RUN ls -la node_modules/.bin
-RUN ./node_modules/.bin/tsc --version
-RUN ./node_modules/.bin/tsc
+RUN npm run build
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-alpine
 
