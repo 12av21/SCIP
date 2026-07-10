@@ -13,8 +13,10 @@ RUN npm install
 
 COPY . .
 
-RUN npx tsc
-
+RUN npm ls typescript
+RUN ls -la node_modules/.bin
+RUN ./node_modules/.bin/tsc --version
+RUN ./node_modules/.bin/tsc
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-alpine
 
