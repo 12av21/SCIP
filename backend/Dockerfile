@@ -1,50 +1,38 @@
 # syntax=docker/dockerfile:1
 
-ARG NODE_VERSION=22.19.0
+ARG NODE_VERSION=20
 
-# Build stage
+# ---------- Build stage ----------
 FROM node:${NODE_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+COPY package*.json ./
 
-RUN npm ci
-
-RUN ls -la node_modules/.bin
-RUN npx tsc --version
+RUN npm install
 
 COPY . .
 
-RUN npm run build
+RUN npx tsc
 
-# Production stage
+# ---------- Production stage ----------
 FROM node:${NODE_VERSION}-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+RUN addgroup -S nodejs && adduser -S nodejs -G nodejs
 
-# Copy package files
-COPY package.json package-lock.json ./
+COPY package*.json ./
 
-# Install production dependencies only
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --omit=dev
 
-# Copy built app from builder
-COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+COPY --from=builder /app/dist ./dist
 
 USER nodejs
 
 EXPOSE 5000
-
-HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/', (r) => { r.resume(); if (r.statusCode !== 200) process.exit(1); process.exit(0); }).on('error', () => process.exit(1))"
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/server.js"]
