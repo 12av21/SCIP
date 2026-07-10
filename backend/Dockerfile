@@ -10,13 +10,13 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install all dependencies (including dev)
 RUN npm ci
 
-# Copy source
+RUN ls -la node_modules/.bin
+RUN npx tsc --version
+
 COPY . .
 
-# Build TypeScript
 RUN npm run build
 
 # Production stage
