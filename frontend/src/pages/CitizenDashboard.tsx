@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import CommunityMap from "../components/CommunityMap";
 import { 
   FilePlus2, 
   Clock, 
@@ -132,6 +133,15 @@ export default function CitizenDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Community map section */}
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <CommunityMap complaints={complaints} />
+      </motion.div>
 
       <div className="mt-8 flex items-center justify-center gap-2 text-slate-400">
         <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Smart Community Intelligence Platform • Secure Session</span>

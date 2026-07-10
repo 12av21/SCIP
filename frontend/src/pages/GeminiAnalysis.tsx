@@ -6,10 +6,17 @@ export default function GeminiAnalysis() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/gemini-analysis").then((res) => {
-      setAnalysis(res.data.analysis);
-      setLoading(false);
-    });
+    api.get("/gemini-analysis")
+      .then((res) => {
+        setAnalysis(res.data.analysis);
+      })
+      .catch((err) => {
+        console.error("Failed to load Gemini analysis", err);
+        setAnalysis("Failed to generate community analysis. Please check your network connection or try again later.");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   return (

@@ -8,26 +8,75 @@ exports.saveComplaint = saveComplaint;
 exports.updateComplaintStatus = updateComplaintStatus;
 const promises_1 = __importDefault(require("fs/promises"));
 const path_1 = __importDefault(require("path"));
-const FILE_PATH = path_1.default.join(process.cwd(), "data", "complaints.json");
-async function getComplaints() {
+const Complaint_1 = __importDefault(require("../models/Complaint"));
+const JSON_FILE_PATH = path_1.default.join(process.cwd(), "data", "complaints.json");
+// Read fallback seed data from local file
+async function loadJSONSeeds() {
     try {
-        const data = await promises_1.default.readFile(FILE_PATH, "utf-8");
+        const data = await promises_1.default.readFile(JSON_FILE_PATH, "utf-8");
         return JSON.parse(data);
     }
-    catch {
+    catch (error) {
+        console.error("Failed to load JSON seed fallback file:", error);
         return [];
     }
 }
+async function getComplaints() {
+    try {
+        // 1. Fetch complaints from MongoDB
+        let dbComplaints = await Complaint_1.default.find({});
+        // 2. If MongoDB is empty, seed it with the existing json seed data
+        if (dbComplaints.length === 0) {
+            console.log("MongoDB complaints collection is empty. Seeding from local files...");
+            const seedData = await loadJSONSeeds();
+            if (seedData.length > 0) {
+                dbComplaints = await Complaint_1.default.insertMany(seedData);
+                console.log(`Successfully seeded ${dbComplaints.length} complaints to MongoDB.`);
+            }
+        }
+        // Convert Mongoose documents to plain objects with virtual mappings
+        return dbComplaints.map(doc => doc.toJSON());
+    }
+    catch (error) {
+        console.error("Error reading complaints from MongoDB:", error);
+        // Safe fallback to JSON seeds directly in case of database connectivity hiccup
+        return await loadJSONSeeds();
+    }
+}
 async function saveComplaint(complaint) {
-    const complaints = await getComplaints();
-    complaints.push(complaint);
-    await promises_1.default.writeFile(FILE_PATH, JSON.stringify(complaints, null, 2));
+    try {
+        const newDoc = new Complaint_1.default({
+            id: complaint.id,
+            title: complaint.title,
+            description: complaint.description,
+            category: complaint.category,
+            location: complaint.location,
+            status: complaint.status || "Pending",
+            lat: complaint.lat,
+            lng: complaint.lng,
+            createdAt: complaint.createdAt,
+            aiSuggestion: complaint.aiSuggestion || null
+        });
+        await newDoc.save();
+        console.log(`Complaint ${complaint.id} successfully written to MongoDB.`);
+    }
+    catch (error) {
+        console.error("Error saving complaint to MongoDB:", error);
+        throw error;
+    }
 }
 async function updateComplaintStatus(id, status) {
-    const complaints = await getComplaints();
-    const updated = complaints.map((item) => item.id === id
-        ? { ...item, status }
-        : item);
-    await promises_1.default.writeFile(FILE_PATH, JSON.stringify(updated, null, 2));
-    return updated;
+    try {
+        // Update the targeted complaint matching custom string id or _id
+        const res = await Complaint_1.default.findOneAndUpdate({ $or: [{ id: id }, { _id: id }] }, { status }, { new: true });
+        if (!res) {
+            console.warn(`No complaint found with ID: ${id}`);
+        }
+        // Return all complaints in active state representation
+        return await getComplaints();
+    }
+    catch (error) {
+        console.error("Error updating complaint status in MongoDB:", error);
+        throw error;
+    }
 }

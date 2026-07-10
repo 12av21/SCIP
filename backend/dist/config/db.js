@@ -6,7 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const connectDB = async () => {
     try {
-        const mongoURI = process.env.mongoURI;
+        const mongoURI = process.env.MONGODB_URI;
+        console.log('Attempting to connect to MongoDB with URI:', mongoURI ? 'URI_PROVIDED' : 'URI_MISSING'); // Log URI presence
         if (!mongoURI) {
             throw new Error('mongoURI is not defined in environment variables.');
         }

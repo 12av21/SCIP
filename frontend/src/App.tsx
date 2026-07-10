@@ -66,7 +66,6 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin', 'super_admin']} />}>
             <Route element={<Layout />}>
               <Route index element={<Dashboard />} />
-              <Route path="submit" element={<SubmitComplaint />} />
               <Route path="complaints" element={<Complaints />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="risk" element={<CommunityRisk />} />

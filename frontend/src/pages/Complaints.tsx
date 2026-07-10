@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import api from "../utils/api"; // Use centralized API client
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, MapPin } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import PriorityBadge from "../components/PriorityBadge";
 import { useAuth } from "../context/AuthContext";
+import CommunityMap from "../components/CommunityMap";
 
 interface Complaint {
   id: string;
@@ -15,6 +16,8 @@ interface Complaint {
   location: string;
   status: string;
   createdAt: string;
+  lat?: number;
+  lng?: number;
   priority?: {
     score: number;
     level: string;
@@ -131,6 +134,12 @@ export default function Complaints() {
         </select>
       </div>
 
+      {!loading && filteredComplaints.length > 0 && (
+        <div style={{ marginBottom: "24px" }}>
+          <CommunityMap complaints={filteredComplaints} />
+        </div>
+      )}
+
       <div className="form-stack">
         {filteredComplaints.map((complaint) => (
           <div key={complaint.id} className="stamp-card p-5"> {/* Use Tailwind class for padding */}
@@ -142,9 +151,17 @@ export default function Complaints() {
               <h2 className="text-lg">{complaint.title}</h2> {/* Use Tailwind class for font-size */}
               <p className="mt-2">{complaint.description}</p> {/* Use Tailwind class for margin-top */}
 
-              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
                 <span className="tag">{complaint.category}</span>
-                <span className="tag">{complaint.location}</span>
+                <span className="tag" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <MapPin size={12} className="text-slate-400" />
+                  <span>{complaint.location}</span>
+                  {complaint.lat && complaint.lng && (
+                    <span style={{ fontSize: "10px", opacity: 0.6, fontFamily: "monospace" }}>
+                      ({complaint.lat.toFixed(4)}, {complaint.lng.toFixed(4)})
+                    </span>
+                  )}
+                </span>
                 <StatusBadge status={complaint.status} />
                 {complaint.priority ? (
                   <PriorityBadge level={complaint.priority.level} score={complaint.priority.score} />

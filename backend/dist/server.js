@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+console.log("MONGODB_URI:", process.env.MONGODB_URI);
+console.log("GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "Loaded" : "Missing");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
@@ -19,6 +21,7 @@ const user_routes_1 = __importDefault(require("./routes/user.routes"));
 const userSettings_routes_1 = __importDefault(require("./routes/userSettings.routes"));
 const auth_service_1 = require("./services/auth.service");
 const error_middleware_1 = require("./middleware/error.middleware");
+const db_1 = __importDefault(require("./config/db"));
 const app = (0, express_1.default)();
 // These must come before any route mounts, or routes registered
 // earlier miss out on CORS headers and parsed JSON bodies.
@@ -40,8 +43,17 @@ app.get("/", (_req, res) => {
 // Must be the last app.use() call — catches anything unhandled above.
 app.use(error_middleware_1.errorHandler);
 const PORT = process.env.PORT || 5000;
-(0, auth_service_1.seedAdminIfMissing)().finally(() => {
-    app.listen(Number(PORT), "0.0.0.0", () => {
-        console.log(`Server running on port ${PORT}`);
-    });
-});
+const startServer = async () => {
+    try {
+        await (0, db_1.default)();
+        await (0, auth_service_1.seedAdminIfMissing)();
+        app.listen(Number(PORT), "0.0.0.0", () => {
+            console.log(`🚀 Server running on port ${PORT}`);
+        });
+    }
+    catch (err) {
+        console.error("Failed to start server:", err);
+        process.exit(1);
+    }
+};
+startServer();

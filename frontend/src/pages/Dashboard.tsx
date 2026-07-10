@@ -16,6 +16,8 @@ interface Complaint {
   title: string;
   location: string;
   status: string;
+  lat?: number;
+  lng?: number;
 }
 
 interface DashboardData {

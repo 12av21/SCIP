@@ -6,7 +6,9 @@
     "category": "Water",
     "location": "Kakori",
     "status": "Pending",
-    "createdAt": "2026-06-21T09:18:25.548Z"
+    "createdAt": "2026-06-21T09:18:25.548Z",
+    "lat": 26.8687,
+    "lng": 80.8146
   },
   {
     "id": "1782034222899",
@@ -15,7 +17,9 @@
     "category": "Road",
     "location": "Lucknow",
     "status": "Pending",
-    "createdAt": "2026-06-21T09:30:22.899Z"
+    "createdAt": "2026-06-21T09:30:22.899Z",
+    "lat": 26.8467,
+    "lng": 80.9462
   },
   {
     "id": "1782034253398",
@@ -24,7 +28,9 @@
     "category": "Electricity",
     "location": "Lucknow",
     "status": "Pending",
-    "createdAt": "2026-06-21T09:30:53.398Z"
+    "createdAt": "2026-06-21T09:30:53.398Z",
+    "lat": 26.855,
+    "lng": 80.935
   },
   {
     "id": "1782034272598",
@@ -33,7 +39,9 @@
     "category": "Waste",
     "location": "Kakori",
     "status": "Pending",
-    "createdAt": "2026-06-21T09:31:12.598Z"
+    "createdAt": "2026-06-21T09:31:12.598Z",
+    "lat": 26.87,
+    "lng": 80.82
   },
   {
     "id": "1782034291285",
@@ -42,7 +50,9 @@
     "category": "Health",
     "location": "Kakori",
     "status": "Pending",
-    "createdAt": "2026-06-21T09:31:31.285Z"
+    "createdAt": "2026-06-21T09:31:31.285Z",
+    "lat": 26.865,
+    "lng": 80.81
   },
   {
     "id": "1783263081481",
@@ -52,6 +62,19 @@
     "location": "lucknow",
     "aiSuggestion": null,
     "status": "Pending",
-    "createdAt": "2026-07-05T14:51:21.481Z"
+    "createdAt": "2026-07-05T14:51:21.481Z",
+    "lat": 26.84,
+    "lng": 80.95
+  },
+  {
+    "id": "1783650263336",
+    "title": "Water Main Breach",
+    "description": "Water Main Breach: There is a massive water leak from the main line flooding the road since 3 hours. Needs urgent department action.",
+    "location": "Sector 4 Lucknow",
+    "category": "Water",
+    "status": "Pending",
+    "lat": 26.843375844115492,
+    "lng": 80.93552629424352,
+    "createdAt": "2026-07-10T02:24:23.336Z"
   }
 ]

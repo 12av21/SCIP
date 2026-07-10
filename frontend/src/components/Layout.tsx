@@ -25,7 +25,6 @@ const NAV_SECTIONS = [
     label: "Overview",
     items: [
       { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
-      { to: "/admin/submit", label: "Submit complaint", icon: FilePlus2 },
       { to: "/admin/complaints", label: "Complaints", icon: FileText },
       { to: "/admin/resources", label: "Resources", icon: Hammer },
     ],

@@ -6,6 +6,8 @@ interface ComplaintRow {
   title: string;
   location: string;
   status: string;
+  lat?: number;
+  lng?: number;
 }
 
 interface Props {
@@ -31,7 +33,16 @@ export default function RecentComplaints({ complaints }: Props) {
             <tr key={item.id}>
               <td className="mono recent-complaints-id">{item.id}</td>
               <td>{item.title}</td>
-              <td>{item.location}</td>
+              <td>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span>{item.location}</span>
+                  {item.lat && item.lng && (
+                    <span style={{ fontSize: '10px', opacity: 0.5, fontFamily: 'monospace' }}>
+                      ({item.lat.toFixed(4)}, {item.lng.toFixed(4)})
+                    </span>
+                  )}
+                </div>
+              </td>
               <td>
                 <StatusBadge status={item.status} />
               </td>

@@ -12,6 +12,24 @@ router.get("/", async (_req, res) => {
     }));
     res.json(enriched);
 });
+router.get("/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const complaints = await (0, fileStorage_1.getComplaints)();
+        const complaint = complaints.find((c) => c.id === id);
+        if (!complaint) {
+            return res.status(404).json({ message: "Complaint not found" });
+        }
+        const enriched = {
+            ...complaint,
+            priority: (0, priorityEngine_1.calculatePriority)(complaint),
+        };
+        res.json(enriched);
+    }
+    catch (error) {
+        res.status(500).json({ error: "Failed to load complaint" });
+    }
+});
 router.post("/", async (req, res) => {
     try {
         const complaint = {
