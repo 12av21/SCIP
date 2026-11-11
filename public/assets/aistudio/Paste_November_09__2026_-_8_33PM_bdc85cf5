@@ -1,0 +1,998 @@
+# SCIP — SMART COMMUNITY INTELLIGENCE PLATFORM
+## MASTER PROMPT: COMPLETE GOVERNMENT EDITION | REAL RBAC | REAL AI/ML | PRODUCTION-GRADE IMPLEMENTATION
+
+You are acting as a principal software architect, senior full-stack engineer, AI/ML engineer, database architect, cybersecurity engineer, QA engineer and government digital-platform designer.
+
+Your assignment is to complete my existing project:
+
+**SCIP — Smart Community Intelligence Platform**
+
+Transform it into a fully functional, secure, scalable, real-data-driven Indian municipal governance and community intelligence platform.
+
+The visual experience should be inspired by the usability, information architecture and accessibility of MyGov.in, while maintaining SCIP's own identity.
+
+This is NOT a demo, prototype, static dashboard, UI-only redesign or mock application.
+
+I require an operational system with:
+- Six independent role-based workspaces.
+- Real authentication and backend authorization.
+- Real database persistence.
+- Complete citizen-to-resolution incident workflows.
+- Functional AI/ML pipelines.
+- Actual analytics and model evaluation.
+- Security and audit controls.
+- Automated testing.
+- Deployment-ready architecture and documentation.
+
+**Do not simply describe how to build this system. Inspect the existing repository and implement it.**
+
+---
+
+# PART 1 — STRICT PROJECT PRESERVATION RULES
+
+Before making changes:
+
+1. Inspect the entire existing repository.
+2. Identify the active frontend and backend entry points.
+3. Identify all existing routes, models, services, middleware, components and tests.
+4. Understand the current authentication and authorization architecture.
+5. Identify all database implementations and determine which one the running application actually uses.
+6. Identify existing completed features, incomplete features and broken integrations.
+7. Prepare a dependency and implementation map.
+
+Preserve the existing working application.
+
+Do not:
+- Create a second unrelated SCIP application.
+- Replace existing working features without justification.
+- Remove existing source files unnecessarily.
+- Overwrite user changes.
+- Introduce fake APIs.
+- Use hardcoded statistics as real data.
+- Create fake incidents or users.
+- Generate random AI predictions.
+- Pretend an API or ML model exists when it does not.
+- Expose credentials or secrets.
+- Modify production databases.
+- Run production migrations.
+- Deploy or publish without explicit approval.
+- Delete database directories or existing worktrees.
+- Use destructive Git commands.
+- Stage, commit or push without authorization.
+
+Preserve the existing technology stack unless a change is technically necessary and documented.
+
+When something cannot be verified, explicitly label it NOT VERIFIED.
+
+---
+
+# PART 2 — TARGET ARCHITECTURE
+
+Preserve and integrate the existing architecture:
+
+### Frontend
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Lucide React
+- Responsive design
+- Accessible components
+
+### Backend
+- Node.js
+- Express
+- TypeScript
+- REST APIs
+- Authentication and authorization middleware
+
+### Database
+- MongoDB
+- Mongoose
+- Repository/service architecture
+- Database indexes
+- Data validation
+- Persistent records
+
+### AI/ML
+- Python
+- FastAPI
+- Scikit-learn
+- TF-IDF
+- Cosine similarity
+- Appropriate clustering algorithms
+- NLP utilities
+- Geospatial analysis
+- Optional Gemini integration
+
+The core platform must work without a paid Gemini API.
+
+Keep AI/ML computation separate from the frontend. Connect it to the backend through authenticated service endpoints.
+
+First verify the actual existing architecture. Do not assume that every folder is part of the active application.
+
+---
+
+# PART 3 — PROFESSIONAL INDIAN GOVERNMENT PORTAL DESIGN
+
+Create a professional citizen-centric government digital portal inspired by MyGov.in.
+
+Do not copy MyGov branding, official government logos, emblems or source code. SCIP must retain its own identity and must not falsely claim to be an official government website.
+
+### A. Utility and accessibility bar
+
+Implement:
+- Skip-to-content navigation.
+- High contrast mode.
+- Font size A-, A and A+.
+- English/Hindi language selection.
+- Keyboard accessibility.
+- Screen-reader-friendly labels.
+- Responsive utility navigation.
+
+Language selection must actually change supported interface text. Do not display an inactive language switch.
+
+### B. Civic header
+
+Implement:
+- SCIP logo and identity.
+- Tricolour-inspired accent.
+- Platform title and subtitle.
+- Global search.
+- Notification drawer.
+- Authenticated user menu.
+- Login/logout controls.
+- Responsive header.
+
+### C. Navigation
+
+Navigation must be generated from the authenticated user's actual roles and permissions.
+
+Provide:
+- Public navigation.
+- Citizen navigation.
+- Field Officer navigation.
+- Department Officer navigation.
+- Data Analyst navigation.
+- Authority Director navigation.
+- Super Administrator navigation.
+
+Do not expose unauthorized actions.
+
+### D. Government portal palette
+
+Use:
+- Deep Navy: #153E63
+- Government Blue: #1F5F91
+- Light Blue: #EAF2F8
+- Background: #F5F7FA
+- White: #FFFFFF
+- Text: #253443
+- Muted: #657586
+- Border: #DCE3EA
+- Saffron: #E89B36
+- Green: #28834A
+- Error: #B42318
+
+Create consistent:
+- Typography.
+- Breadcrumbs.
+- Buttons.
+- Cards.
+- Forms.
+- Tables.
+- Modals.
+- Notifications.
+- Status badges.
+- Loading states.
+- Error states.
+- Empty states.
+- Charts.
+- Maps.
+
+The public portal should be simple and citizen-friendly. Administrative workspaces should prioritize operational efficiency.
+
+---
+
+# PART 4 — SIX COMPLETE ROLE-BASED WORKSPACES
+
+Preserve existing valid role names and permissions. Map them to the following six personas without creating duplicate or conflicting roles.
+
+All role enforcement must exist on the backend.
+
+## ROLE 1: CITIZEN
+
+Workspace: Citizen Services Dashboard.
+
+Features:
+
+1. Personal dashboard.
+2. Submit grievance or community incident.
+3. Select incident category.
+4. Enter incident description.
+5. Capture actual GPS coordinates with user permission.
+6. Select location manually when GPS is unavailable.
+7. Upload up to four photographs with configurable size limits.
+8. Validate files on the backend.
+9. Preview AI-generated incident category.
+10. Receive duplicate report warnings.
+11. Submit a grievance.
+12. Receive a unique report ID.
+13. Track report status.
+14. View report history.
+15. View authorized department responses.
+16. Receive notifications.
+17. Access public incident information.
+18. Provide feedback after resolution.
+19. View personal profile.
+20. Manage account settings.
+
+A citizen must never access another citizen's private report without explicit authorization.
+
+## ROLE 2: FIELD OFFICER
+
+Workspace: Field Operations.
+
+Features:
+
+1. Assigned work orders.
+2. Assigned incident details.
+3. Incident location and coordinates.
+4. Inspection schedule.
+5. Physical verification checklist.
+6. Safety hazard assessment.
+7. Structural damage verification.
+8. Utility impact verification.
+9. Upload field evidence.
+10. Add inspection notes.
+11. Submit inspection report.
+12. Request additional information.
+13. Update authorized status.
+14. View assignment history.
+15. Receive assignment notifications.
+
+Field officers must only access authorized assignments and permitted operations.
+
+## ROLE 3: DEPARTMENT DESK OFFICER
+
+Workspace: Department Operations.
+
+Features:
+
+1. Department-specific incident queue.
+2. Pending report review.
+3. Assign field investigators.
+4. Reassign officers.
+5. Review field evidence.
+6. Verify inspections.
+7. Approve or reject inspection results.
+8. Escalate critical incidents.
+9. Update permitted incident statuses.
+10. Add official remarks.
+11. Track departmental SLA.
+12. Monitor resolution time.
+13. Export authorized CSV reports.
+14. View department performance.
+
+All assignments and approvals must generate audit records.
+
+## ROLE 4: DATA AND AI ANALYST
+
+Workspace: Intelligence and Analytics.
+
+Features:
+
+1. Incident analytics.
+2. Category distribution.
+3. Geographic distribution.
+4. Time-series analysis.
+5. Duplicate detection analytics.
+6. Hotspot analysis.
+7. Department performance.
+8. Resolution time analysis.
+9. Dataset quality audit.
+10. Model evaluation dashboard.
+11. Model version information.
+12. Confusion matrix.
+13. Precision, recall, F1 and accuracy.
+14. Inference latency.
+15. AI-generated analytical summaries.
+16. Authorized report export.
+17. Data quality warnings.
+
+All statistics must be derived from actual authorized database records.
+
+## ROLE 5: AUTHORITY DIRECTOR
+
+Workspace: Executive Operations and Intelligence Command.
+
+Features:
+
+1. Authorized citywide or regional dashboard.
+2. Incident overview.
+3. Critical incident monitoring.
+4. Department comparisons.
+5. Multi-agency coordination.
+6. Incident confirmation.
+7. Escalation management.
+8. SLA monitoring.
+9. Geospatial incident map.
+10. Hotspot visualization.
+11. Response performance.
+12. Trend analysis.
+13. Executive intelligence summaries.
+14. Human-in-the-loop AI review.
+15. Operational reporting.
+
+The director must not automatically receive unrestricted super-admin privileges.
+
+## ROLE 6: SUPER ADMINISTRATOR
+
+Workspace: Platform Administration.
+
+Features:
+
+1. User management.
+2. Account activation and suspension.
+3. Role assignment.
+4. Permission management.
+5. Department management.
+6. Geographic hierarchy management.
+7. System configuration.
+8. Audit logs.
+9. Security events.
+10. AI/ML service health.
+11. Model version management.
+12. Training job management.
+13. Application health.
+14. Database health.
+15. Backup status.
+16. System diagnostics.
+17. Platform-wide reports.
+
+Restrict these controls to authorized administrators.
+
+Never permit an ordinary administrator to silently grant themselves higher privileges.
+
+---
+
+# PART 5 — REAL RBAC AND AUTHORIZATION
+
+Implement permission-based access control, not just role-based menu visibility.
+
+Create or verify:
+
+- Role definitions.
+- Permission registry.
+- Role-permission mapping.
+- User-role mapping.
+- Protected routes.
+- Backend authorization middleware.
+- Resource ownership validation.
+- Department-level data isolation.
+- Geographic data restrictions.
+- Account status checks.
+- Audit events for sensitive operations.
+
+Each API must validate:
+
+1. Is the user authenticated?
+2. Is the account active?
+3. Does the user possess the required permission?
+4. Is the requested resource within the user's permitted scope?
+5. Is the requested workflow transition allowed?
+
+Test direct unauthorized API requests.
+
+Test:
+- Citizen accessing another citizen's report.
+- Officer accessing unassigned incidents.
+- Department officer accessing another department's records.
+- Analyst accessing restricted personal information.
+- Director attempting super-admin actions.
+- Suspended user making API requests.
+- Unauthorized role escalation.
+
+The frontend is not a security boundary.
+
+---
+
+# PART 6 — COMPLETE INCIDENT MANAGEMENT LIFECYCLE
+
+Implement the entire workflow:
+
+1. Citizen creates a report.
+2. Backend validates input.
+3. Report is stored in MongoDB.
+4. AI categorizes the incident.
+5. Duplicate detection executes.
+6. Risk assessment executes.
+7. Incident enters the correct review queue.
+8. Department officer reviews the report.
+9. Field officer receives an assignment.
+10. Field officer performs inspection.
+11. Inspection evidence is stored.
+12. Department officer verifies the inspection.
+13. Authorized officer approves or rejects the result.
+14. Incident is escalated when necessary.
+15. Resolution evidence is submitted.
+16. Citizen receives notifications.
+17. Citizen tracks the report.
+18. Citizen provides feedback.
+19. Analytics update from persisted records.
+20. Audit trail records every important operation.
+
+Define valid workflow states and transitions.
+
+Prevent unauthorized status changes, duplicate assignments and inconsistent records.
+
+Implement transaction handling or another safe consistency strategy where multiple records must change together.
+
+---
+
+# PART 7 — REAL AI/ML INTELLIGENCE ENGINE
+
+Implement actual algorithms, not static AI dashboard elements.
+
+## A. TF-IDF incident classification
+
+Build a real text classification pipeline.
+
+Input:
+- Title.
+- Description.
+- Incident category information.
+- Available metadata.
+
+Output:
+- Predicted category.
+- Confidence score where statistically justified.
+- Alternative categories.
+- Model version.
+- Classification evidence.
+
+Start with TF-IDF and an appropriate Scikit-learn classifier.
+
+Support eight or more configurable municipal incident categories where the existing dataset and category definitions justify them.
+
+Do not invent training labels.
+
+If there is insufficient labelled data, provide a transparent rule-based or similarity-based fallback and label it correctly.
+
+## B. Duplicate incident detection
+
+Implement:
+- Text normalization.
+- TF-IDF vectorization.
+- Cosine similarity.
+- Geographic proximity using Haversine distance.
+- Time-window comparison.
+- Candidate duplicate retrieval.
+- Similarity scores.
+- Human review.
+
+Never automatically delete or merge submitted reports.
+
+## C. Explainable risk scoring
+
+Create a documented risk scoring engine using relevant factors:
+
+- Incident severity.
+- Cluster size.
+- Citizen-reported urgency.
+- Historical recurrence.
+- Category hazard weight.
+- Location vulnerability.
+- Available verification evidence.
+
+Document weights, normalization and missing-data behavior.
+
+Clearly distinguish rule-based scores from ML predictions.
+
+Do not manufacture missing factors.
+
+## D. Geospatial clustering
+
+Implement actual:
+- Haversine distance calculations.
+- DBSCAN or a suitable alternative.
+- Incident density analysis.
+- Geographic clustering.
+- Hotspot visualization.
+- Time-period comparisons.
+
+Only use genuine coordinates.
+
+Clearly indicate the coverage and limitations of the available dataset.
+
+## E. Trend analysis and forecasting
+
+Implement:
+- Weekly trends.
+- Monthly trends.
+- Category trends.
+- Department trends.
+- Geographic trends.
+- Recurrence patterns.
+- Forecasting when sufficient historical data exists.
+
+Do not produce confident forecasts from insufficient records.
+
+## F. NLP processing
+
+Implement useful NLP capabilities:
+- Text preprocessing.
+- Keyword extraction.
+- Language detection when suitable.
+- Named entity recognition where appropriate.
+- Incident summarization.
+- Urgency signals where justified.
+
+Do not treat sentiment as incident severity.
+
+## G. AI community assistant
+
+Implement a permission-aware AI assistant.
+
+Capabilities:
+- Explain grievance procedures.
+- Help citizens write clear reports.
+- Explain report status.
+- Summarize authorized incidents.
+- Answer questions about community trends.
+- Help officers summarize inspections.
+- Help analysts interpret data.
+- Provide administrative assistance to authorized administrators.
+
+Use Gemini through a secure backend adapter only when configured.
+
+Implement a non-paid fallback for essential assistance.
+
+The assistant must never reveal private records to unauthorized users.
+
+Protect against prompt injection, sensitive-data leakage and unauthorized tool access.
+
+## H. AI/ML monitoring
+
+Provide:
+- Model name.
+- Model version.
+- Training dataset size.
+- Training timestamp.
+- Evaluation timestamp.
+- Accuracy.
+- Precision.
+- Recall.
+- F1-score.
+- Confusion matrix.
+- Per-class performance.
+- Inference latency.
+- Prediction count.
+- Model status.
+- Dataset quality.
+- Model history.
+
+Metrics must be calculated from actual evaluation results.
+
+Do not hardcode attractive performance numbers.
+
+---
+
+# PART 8 — AI/ML EVALUATION INTEGRITY
+
+This section is mandatory.
+
+The reported 90.91% accuracy on 22 records must not automatically be treated as a production-valid metric.
+
+Implement a proper evaluation pipeline:
+
+1. Identify labelled training data.
+2. Validate labels.
+3. Separate training and testing records.
+4. Prevent data leakage.
+5. Use stratified splitting where appropriate.
+6. Use cross-validation when dataset size permits.
+7. Calculate accuracy.
+8. Calculate macro precision.
+9. Calculate macro recall.
+10. Calculate macro F1.
+11. Calculate per-class metrics.
+12. Generate a confusion matrix.
+13. Record evaluation sample size.
+14. Record model version.
+15. Record evaluation date.
+16. Measure inference latency using a documented method.
+
+If the dataset is too small:
+- Display insufficient evaluation data.
+- Show sample size.
+- Report limitations.
+- Do not label the model production-validated.
+
+Keep training and evaluation data separate.
+
+Do not use training-set accuracy as test accuracy.
+
+Do not claim that a heuristic algorithm is a trained ML model.
+
+---
+
+# PART 9 — DATA QUALITY AND ANALYTICS
+
+Implement actual dataset audits.
+
+Calculate:
+- Missing values.
+- Duplicate records.
+- Coordinate validity.
+- Description completeness.
+- Class distribution.
+- Category imbalance.
+- Geographic coverage.
+- Timestamp validity.
+- Data freshness.
+- Unusual values.
+- Inconsistent workflow states.
+
+Provide an explainable data quality score.
+
+Do not assign A+ or Production Verified without documented thresholds and sufficient data.
+
+Display dataset sample size and limitations alongside metrics.
+
+All dashboards and charts must query persisted data.
+
+---
+
+# PART 10 — REAL DATABASE PERSISTENCE
+
+The current implementation may use .scip_database.json.
+
+Inspect it carefully and determine the actual active persistence architecture.
+
+A JSON file may be useful for local development or a disposable prototype, but must not be treated as equivalent to production-grade database infrastructure.
+
+Implement MongoDB persistence using Mongoose and a repository/service pattern.
+
+Persist:
+
+- Users.
+- Roles.
+- Permissions.
+- Departments.
+- Geographic regions.
+- Reports.
+- Incidents.
+- Assignments.
+- Inspections.
+- Evidence metadata.
+- Status history.
+- Notifications.
+- Feedback.
+- Audit logs.
+- AI predictions.
+- Model metadata.
+- Training job metadata.
+
+Requirements:
+
+- Schema validation.
+- Appropriate indexes.
+- Unique identifiers.
+- Timestamps.
+- Pagination.
+- Filtering.
+- Safe concurrent writes.
+- Referential integrity checks.
+- Error handling.
+- Backup and recovery documentation.
+- Database health monitoring.
+
+Do not silently fall back to in-memory or JSON persistence in production.
+
+Do not automatically seed demo data in production.
+
+Do not migrate or connect to production databases without explicit authorization.
+
+---
+
+# PART 11 — AUDIT TRAIL AND GOVERNANCE
+
+Implement an append-only audit architecture.
+
+Record:
+- Actor ID.
+- Actor role.
+- Action.
+- Resource type.
+- Resource ID.
+- Timestamp.
+- IP address where lawfully collected.
+- Request correlation ID.
+- Relevant change metadata.
+- Success or failure.
+
+Protect audit records from ordinary update/delete operations.
+
+Use hash chaining or another tamper-evident design where appropriate.
+
+Provide an independent audit verification process.
+
+Do not claim absolute immutability merely because records are stored in a file or database.
+
+Protect personal information and limit retention to documented policy.
+
+---
+
+# PART 12 — SECURITY
+
+Implement and test:
+
+- Secure password hashing.
+- Authentication.
+- JWT/session security.
+- Token expiry and revocation strategy.
+- Role and permission validation.
+- Resource ownership.
+- Department isolation.
+- Input validation.
+- Output encoding.
+- XSS protection.
+- CSRF protection where applicable.
+- Rate limiting.
+- Secure file uploads.
+- File type and size validation.
+- Safe file storage.
+- CORS restrictions.
+- Security headers.
+- Secret management.
+- Database access restrictions.
+- API error handling.
+- Audit logging.
+- AI privacy protections.
+- Prompt injection protections.
+
+Never expose stack traces, tokens, passwords, API keys or internal configuration to users.
+
+---
+
+# PART 13 — NOTIFICATIONS AND SEARCH
+
+Implement real notifications for:
+- Report submission.
+- Assignment.
+- Inspection completion.
+- Verification.
+- Rejection.
+- Escalation.
+- Resolution.
+- Feedback requests.
+
+Implement:
+- Unread counts.
+- Mark-as-read.
+- Notification history.
+- User-specific notification access.
+
+Implement universal search for:
+- Report IDs.
+- Incident IDs.
+- Authorized department names.
+- Permitted public records.
+
+Search results must respect backend authorization and privacy restrictions.
+
+---
+
+# PART 14 — TESTING AND QUALITY ASSURANCE
+
+Create a real automated test suite.
+
+### Unit tests
+- Classification.
+- Similarity.
+- Risk scoring.
+- Haversine calculations.
+- Clustering.
+- Permission evaluation.
+- Input validation.
+
+### Integration tests
+- Authentication.
+- User management.
+- Report creation.
+- Assignment.
+- Inspection.
+- Verification.
+- Notifications.
+- Audit logging.
+- Database persistence.
+
+### Authorization tests
+Test every role against every protected action.
+
+### AI/ML tests
+- Real algorithm outputs.
+- Edge cases.
+- Empty input.
+- Unknown categories.
+- Missing coordinates.
+- Dataset insufficiency.
+- Evaluation correctness.
+- Leakage prevention.
+
+### End-to-end tests
+
+Test the complete workflow:
+
+Citizen → Department Officer → Field Officer → Verification → Resolution → Citizen feedback.
+
+### Persistence tests
+
+Test:
+- Save.
+- Read.
+- Update.
+- Concurrent operations.
+- Application restart.
+- Data integrity.
+
+Use isolated disposable test databases only.
+
+Never run automated tests against production data.
+
+A test endpoint returning 25/25 does not prove tests passed. Report actual test names and assertions.
+
+---
+
+# PART 15 — DEPLOYMENT AND OPERATIONS
+
+Prepare a deployment-ready architecture.
+
+Provide:
+- Environment variable documentation.
+- Secure configuration.
+- Production build instructions.
+- Backend deployment instructions.
+- Frontend deployment instructions.
+- MongoDB deployment guidance.
+- AI service deployment guidance.
+- Health checks.
+- Structured logging.
+- Error monitoring.
+- Backup strategy.
+- Recovery procedure.
+- Deployment checklist.
+- Rollback strategy.
+- Resource requirements.
+
+Do not deploy without explicit approval.
+
+Do not include credentials in documentation or source files.
+
+---
+
+# PART 16 — IMPLEMENTATION PLAN
+
+Work through these milestones sequentially.
+
+### MILESTONE 1: COMPLETE REPOSITORY AUDIT
+Inspect the existing application and produce a factual architecture and feature report.
+
+### MILESTONE 2: DATABASE AND PERSISTENCE
+Implement reliable MongoDB persistence and test restart durability in an isolated environment.
+
+### MILESTONE 3: AUTHENTICATION AND RBAC
+Complete all six workspaces, permissions, resource ownership and backend authorization.
+
+### MILESTONE 4: INCIDENT WORKFLOWS
+Complete citizen reporting, assignment, field inspection, verification, resolution, notifications and audit history.
+
+### MILESTONE 5: AI/ML ENGINE
+Implement classification, duplicate detection, risk scoring, clustering, NLP, trends and model evaluation.
+
+### MILESTONE 6: GOVERNMENT PORTAL FRONTEND
+Complete the public website, six role dashboards, responsive navigation, accessible components and working interactions.
+
+### MILESTONE 7: ANALYTICS AND AI ASSISTANT
+Complete real-data dashboards, model monitoring and permission-aware AI assistance.
+
+### MILESTONE 8: SECURITY AND TESTING
+Complete security review, unit tests, integration tests, authorization tests and end-to-end testing.
+
+### MILESTONE 9: DEPLOYMENT READINESS
+Prepare operational documentation, configuration, backup/recovery and deployment procedures.
+
+Do not skip milestones.
+
+Do not implement additional decorative features while critical persistence, security or workflow defects remain.
+
+---
+
+# PART 17 — FINAL ACCEPTANCE CRITERIA
+
+SCIP cannot be declared complete until all applicable requirements have evidence.
+
+1. Six role-specific workspaces operate correctly.
+2. Backend authorization protects every restricted API.
+3. Citizen records remain private.
+4. Department boundaries are enforced.
+5. All incident workflow transitions work.
+6. Data persists through application restart.
+7. No production JSON or in-memory fallback is used.
+8. AI classification executes actual algorithms.
+9. Duplicate detection returns real similarity results.
+10. Risk scoring is explainable.
+11. Geospatial analysis uses real coordinates.
+12. Trend analysis uses persisted historical records.
+13. ML metrics use independent evaluation.
+14. Dataset quality metrics are transparent.
+15. AI assistant respects authorization.
+16. Audit history is tamper-evident.
+17. Notifications work.
+18. Search respects permissions.
+19. All visible buttons and forms work.
+20. All critical security tests pass.
+21. Automated tests execute against isolated test data.
+22. Application builds and typechecks successfully.
+23. No critical defects remain.
+24. Deployment and recovery procedures are documented.
+
+---
+
+# PART 18 — MANDATORY FINAL REPORT
+
+For every milestone, provide:
+
+- Files inspected.
+- Files created.
+- Files modified.
+- Existing functionality preserved.
+- Features implemented.
+- API endpoints.
+- Database changes.
+- Role and permission changes.
+- AI/ML algorithms.
+- Model evaluation methodology.
+- Tests actually executed.
+- Exact test results.
+- Known limitations.
+- Security findings.
+- Remaining blockers.
+
+Use these status labels:
+
+- SOURCE VERIFIED
+- IMPLEMENTED
+- BUILD VERIFIED
+- TEST VERIFIED
+- RUNTIME VERIFIED
+- NOT VERIFIED
+- NOT IMPLEMENTED
+- PRODUCTION BLOCKER
+
+Never confuse successful compilation with functional verification.
+
+Never confuse a working local application with production readiness.
+
+Never claim that AI/ML is validated without independent evaluation evidence.
+
+---
+
+# FINAL EXECUTION INSTRUCTION
+
+Begin by auditing the existing SCIP repository.
+
+Then implement all missing features incrementally, using the existing architecture and preserving existing working code.
+
+Do not stop after producing a plan or attractive frontend.
+
+Continue implementing, testing, correcting and documenting each milestone.
+
+If a task is blocked by missing information, dependencies, credentials, insufficient data or required approval, identify the blocker precisely and continue with safe independent work.
+
+The final goal is:
+
+**SCIP — A complete, secure, persistent, role-based, AI/ML-powered Smart Community Intelligence Platform with real municipal workflows, reliable analytics, explainable intelligence and production-grade engineering.**
+
+Build a working platform, not a demonstration of one.

@@ -1,0 +1,8 @@
+{
+  "name": "SCIP — Smart Community Intelligence Platform",
+  "description": "AI-assisted community intelligence platform connecting citizen reports, detecting spatio-temporal hazard clusters, and delivering decision support with Responsible AI governance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
