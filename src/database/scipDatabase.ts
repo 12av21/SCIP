@@ -1395,31 +1395,60 @@ export class SCIPDatabase {
     if (total === 0) {
       return {
         totalRecords: 0,
-        completenessRatio: 1.0,
-        coordinateIntegrity: 1.0,
-        classBalanceScore: 1.0,
+        completenessRatio: 0,
+        coordinateIntegrity: 0,
+        classBalanceScore: 0,
         activeHotspotDensity: 0,
         duplicateOverlapPercent: 0,
-        dataHealthGrade: 'A+'
+        dataHealthGrade: 'N/A (No data)'
       };
     }
 
-    const withValidCoords = reps.filter(r => r.latitude >= -90 && r.latitude <= 90 && r.longitude >= -180 && r.longitude <= 180).length;
-    const withDetailedText = reps.filter(r => r.description && r.description.length >= 20).length;
-    const withDuplicates = Array.from(this.analyses.values()).filter(a => a.duplicateProbability >= 0.70).length;
+    const withValidCoords = reps.filter(
+      r => Number.isFinite(r.latitude) && Number.isFinite(r.longitude) && r.latitude >= -90 && r.latitude <= 90 && r.longitude >= -180 && r.longitude <= 180
+    ).length;
+    const withDetailedText = reps.filter(r => typeof r.description === 'string' && r.description.trim().length >= 20).length;
+    const withDuplicates = Array.from(this.analyses.values()).filter(a => (a?.duplicateProbability ?? 0) >= 0.7).length;
 
     const completeness = Number((withDetailedText / total).toFixed(2));
     const coordIntegrity = Number((withValidCoords / total).toFixed(2));
     const dupPercent = Number(((withDuplicates / total) * 100).toFixed(1));
 
+    // Class balance: 1.0 when perfectly uniform across observed categories, lower when skewed.
+    const countsByCategory = new Map<string, number>();
+    for (const r of reps) {
+      const cat = r.category || 'unknown';
+      countsByCategory.set(cat, (countsByCategory.get(cat) || 0) + 1);
+    }
+    const catCounts = Array.from(countsByCategory.values());
+    const k = catCounts.length || 1;
+    let classBalanceScore = 1;
+    if (k > 1) {
+      let sumSq = 0;
+      for (const c of catCounts) {
+        const p = c / total;
+        sumSq += p * p;
+      }
+      // Normalized inverse concentration: 1 => uniform, 0 => all in one class
+      classBalanceScore = Number((((1 / sumSq) - 1) / (k - 1)).toFixed(2));
+      if (!Number.isFinite(classBalanceScore)) classBalanceScore = 0;
+      classBalanceScore = Math.max(0, Math.min(1, classBalanceScore));
+    }
+
+    // Honest, heuristic grade based on observable quality signals (not a production certification).
+    let grade = 'D';
+    if (completeness >= 0.95 && coordIntegrity >= 0.98 && classBalanceScore >= 0.7 && dupPercent <= 10) grade = 'A';
+    else if (completeness >= 0.85 && coordIntegrity >= 0.95 && classBalanceScore >= 0.5 && dupPercent <= 20) grade = 'B';
+    else if (completeness >= 0.7 && coordIntegrity >= 0.85) grade = 'C';
+
     return {
       totalRecords: total,
       completenessRatio: completeness,
       coordinateIntegrity: coordIntegrity,
-      classBalanceScore: 0.92,
+      classBalanceScore,
       activeHotspotDensity: this.incidents.size,
       duplicateOverlapPercent: dupPercent,
-      dataHealthGrade: completeness >= 0.9 ? 'A+ (Production Verified)' : 'B (Needs Augmentation)'
+      dataHealthGrade: `${grade} (heuristic data-quality signal; not a production certification)`
     };
   }
 }

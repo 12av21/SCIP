@@ -1,6 +1,7 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-test-'));
 const tmpDb = path.join(tmpDir, 'scip_test_db.json');
@@ -144,6 +145,73 @@ const prevSv = u.sessionVersion || 0;
 (db as any).invalidateUserSessions(admin.id);
 const u2 = db.getUserById(admin.id)! as any;
 ok('invalidateUserSessions increments sessionVersion', (u2.sessionVersion || 0) === prevSv + 1);
+
+// Additional isolated audit-integrity cases (no rewrite of historical records)
+const baseAudit = JSON.parse(fs.readFileSync(tmpDb, 'utf-8'));
+if (Array.isArray(baseAudit.auditLogs) && baseAudit.auditLogs.length >= 4) {
+  // Reordered records (swap adjacent entries) must break verification
+  const reordered = JSON.parse(JSON.stringify(baseAudit));
+  const tmpSwap = reordered.auditLogs[1];
+  reordered.auditLogs[1] = reordered.auditLogs[2];
+  reordered.auditLogs[2] = tmpSwap;
+  const reorderedPath = path.join(tmpDir, 'scip_reordered.json');
+  fs.writeFileSync(reorderedPath, JSON.stringify(reordered, null, 2), 'utf-8');
+  const { SCIPDatabase: DBR } = await import('../src/database/scipDatabase.js?reorder=' + Date.now());
+  ok('audit tamper detected on isolated copy (reordered records)', new DBR(reorderedPath).verifyAuditIntegrity().isValid === false);
+
+  // Invalid genesis: first chronological record prevHash must be genesis-zero
+  const badGenesis = JSON.parse(JSON.stringify(baseAudit));
+  const chron = [...badGenesis.auditLogs].reverse();
+  chron[0].prevHash = 'f'.repeat(64);
+  badGenesis.auditLogs = chron.reverse();
+  const badGenesisPath = path.join(tmpDir, 'scip_bad_genesis.json');
+  fs.writeFileSync(badGenesisPath, JSON.stringify(badGenesis, null, 2), 'utf-8');
+  const { SCIPDatabase: DBG } = await import('../src/database/scipDatabase.js?genesis=' + Date.now());
+  ok('audit tamper detected on isolated copy (invalid genesis prevHash)', new DBG(badGenesisPath).verifyAuditIntegrity().isValid === false);
+
+  // Invalid previous hash value on a later record (explicit)
+  const badPrev = JSON.parse(JSON.stringify(baseAudit));
+  if (badPrev.auditLogs.length > 2) badPrev.auditLogs[1].prevHash = 'abc123';
+  const badPrevPath = path.join(tmpDir, 'scip_bad_prev.json');
+  fs.writeFileSync(badPrevPath, JSON.stringify(badPrev, null, 2), 'utf-8');
+  const { SCIPDatabase: DBP } = await import('../src/database/scipDatabase.js?badprev=' + Date.now());
+  ok('audit tamper detected on isolated copy (invalid prevHash value)', new DBP(badPrevPath).verifyAuditIntegrity().isValid === false);
+
+  // Legacy pipe-format records remain verifiable (no rewrite)
+  const legacy = JSON.parse(JSON.stringify(baseAudit));
+  const genesis = '0000000000000000000000000000000000000000000000000000000000000000';
+  const lchron = [...legacy.auditLogs].reverse();
+  // Recompute hashes in legacy pipe format for all records to simulate a consistent historical legacy chain
+  let prev = genesis;
+  for (let i = 0; i < lchron.length; i++) {
+    const e = lchron[i];
+    e.prevHash = prev;
+    const legacyStr = `${prev}|${e.id}|${e.timestamp}|${e.action}|${e.module}|${e.userId}|${e.details ?? ''}`;
+    e.hash = crypto.createHash('sha256').update(legacyStr).digest('hex');
+    prev = e.hash;
+  }
+  legacy.auditLogs = lchron.reverse();
+  const legacyPath = path.join(tmpDir, 'scip_legacy.json');
+  fs.writeFileSync(legacyPath, JSON.stringify(legacy, null, 2), 'utf-8');
+  const { SCIPDatabase: DBL } = await import('../src/database/scipDatabase.js?legacy=' + Date.now());
+  const vLegacy = new DBL(legacyPath).verifyAuditIntegrity();
+  ok('legacy pipe-format audit records verifiable on isolated copy', vLegacy.isValid === true);
+} else {
+  results.push('SKIP: extended audit tamper cases (insufficient logs)');
+}
+
+// Restart verification: reload same persisted temp DB and verify chain is intact
+const { SCIPDatabase: DBRestart } = await import('../src/database/scipDatabase.js?restart=' + Date.now());
+const dbRestart = new DBRestart(tmpDb);
+const vRestart = dbRestart.verifyAuditIntegrity();
+ok('audit chain verifiable after restart/reload (isolated DB)', vRestart.isValid === true);
+
+// Rapid/concurrent-like appends (sequential in-process) must preserve verifiable chain
+db.logAudit({ action: 'SECURITY_EVENT', module: 'security', userId: admin.id, userEmail: admin.email, userRole: admin.role, ipAddress: '127.0.0.1', details: 'concurrent-sim-1' } as any);
+db.logAudit({ action: 'SECURITY_EVENT', module: 'security', userId: admin.id, userEmail: admin.email, userRole: admin.role, ipAddress: '127.0.0.1', details: 'concurrent-sim-2' } as any);
+db.logAudit({ action: 'SECURITY_EVENT', module: 'security', userId: admin.id, userEmail: admin.email, userRole: admin.role, ipAddress: '127.0.0.1', details: 'concurrent-sim-3' } as any);
+const vConcurrent = db.verifyAuditIntegrity();
+ok('audit chain valid after rapid sequential appends (isolated DB)', vConcurrent.isValid === true);
 
 console.log(results.join('\n'));
 console.log(`SUMMARY: ${passed} passed, ${failed} failed`);

@@ -24,6 +24,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Production build
+        run: npm run build
+
       - name: Security smoke tests (isolated temp DB)
         run: npm run test:security
         env:
