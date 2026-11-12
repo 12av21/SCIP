@@ -1453,9 +1453,6 @@ export class SCIPDatabase {
   }
 }
 
-// Global Singleton Database Instance
-export const db = new SCIPDatabase();
-
 
 
 

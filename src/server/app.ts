@@ -9,7 +9,8 @@ import incidentRoutes from './routes/incidentRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
 import adminRoutes from './routes/adminRoutes';
 import miscRoutes from './routes/miscRoutes';
-import { initMongoConnection } from '../database/mongoConnection.js';
+import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
+import { tryEnableMongoRuntime } from '../database/index.js';
 import { validateJwtConfigOnStartup } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,9 +28,11 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   const app = express();
 
-  // Initialize MongoDB connection lifecycle asynchronously if configured
+  // Initialize MongoDB connection lifecycle asynchronously if configured, then safely
+  // evaluate explicit isolated runtime gates (no split-brain/default cutover).
   if (options.initMongo !== false) {
     await initMongoConnection().catch(() => {});
+    try { tryEnableMongoRuntime(getMongoRuntimeStatus() as any); } catch { /* keep JSON fallback */ }
   }
 
   // Security headers and restrictive defaults
@@ -154,6 +157,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
 export async function startServer() {
   const app = await createApp();
+  const { closeMongoConnection } = await import('../database/mongoConnection.js');
 
   // Dev server must run on port 3000. Respect --port arg, else fallback to 3000.
   let PORT = 3000;
@@ -165,7 +169,7 @@ export async function startServer() {
     PORT = parseInt(process.env.PORT, 10);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     if (process.env.NODE_ENV === 'production') {
       console.log(`[SCIP] Server running on port ${PORT}`);
     } else {
@@ -173,5 +177,23 @@ export async function startServer() {
     }
   });
 
-  return app;
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[SCIP] Received ${signal}. Shutting down gracefully...`);
+    }
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Force-resolve in case server.close hangs (e.g. keep-alive); do not exit process here except via caller context.
+      setTimeout(() => resolve(), 5000).unref?.();
+    });
+    await closeMongoConnection().catch(() => {});
+  };
+
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+  return { app, server };
 }

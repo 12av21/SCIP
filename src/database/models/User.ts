@@ -1,5 +1,4 @@
-// Mongoose Schema for User Entity
-import mongoose, { Schema, Document } from 'mongoose';
+﻿import mongoose, { Schema, Document } from 'mongoose';
 import { UserRole } from '../../types/scip.js';
 
 export interface IUserDocument extends Document {
@@ -12,6 +11,8 @@ export interface IUserDocument extends Document {
   departmentName?: string;
   phone?: string;
   status: 'active' | 'suspended';
+  sessionVersion?: number;
+  credentialsResetRequired?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,11 +32,13 @@ const UserSchema = new Schema<IUserDocument>(
     departmentId: { type: String },
     departmentName: { type: String },
     phone: { type: String },
-    status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true }
+    status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
+    sessionVersion: { type: Number, default: 0 },
+    credentialsResetRequired: { type: Boolean, default: false },
+    createdAt: { type: String, required: true },
+    updatedAt: { type: String, required: true }
   },
-  {
-    timestamps: true
-  }
+  { timestamps: false }
 );
 
 export const UserModel = mongoose.models.User || mongoose.model<IUserDocument>('User', UserSchema);

@@ -1,5 +1,4 @@
-// Mongoose Schema for Report Entity
-import mongoose, { Schema, Document } from 'mongoose';
+﻿import mongoose, { Schema, Document } from 'mongoose';
 import { ReportCategory, ReportStatus, UrgencyLevel } from '../../types/scip.js';
 
 export interface IReportDocument extends Document {
@@ -71,11 +70,11 @@ const ReportSchema = new Schema<IReportDocument>(
       index: true
     },
     incidentId: { type: String, index: true },
-    images: [{ type: String }]
+    images: [{ type: String }],
+    createdAt: { type: String, required: true, index: true },
+    updatedAt: { type: String, required: true }
   },
-  {
-    timestamps: true
-  }
+  { timestamps: false }
 );
 
 ReportSchema.index({ latitude: 1, longitude: 1 });

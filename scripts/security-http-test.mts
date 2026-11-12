@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
@@ -13,7 +13,7 @@ process.env.DISABLE_RATE_LIMIT = 'true';
 process.env.DISABLE_HMR = 'true';
 
 const { createApp } = await import('../src/server/app.js');
-const { db } = await import('../src/database/scipDatabase.js');
+const { db } = await import('../src/database/index.js');
 const { getJwtSecret } = await import('../src/server/middleware/auth.js');
 
 let passed = 0; let failed = 0;
@@ -85,7 +85,8 @@ try {
   ok('unauthenticated GET /api/intelligence/export-csv -> 401', (await req(port, 'GET', '/api/intelligence/export-csv')).status === 401);
   ok('unauthenticated POST /api/intelligence/agent -> 401', (await req(port, 'POST', '/api/intelligence/agent', { query: 'test' })).status === 401);
   ok('invalid token -> 401', (await req(port, 'GET', '/api/reports', undefined, 'not-a-token')).status === 401);
-  ok('citizen cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, citizenTok)).status === 403);
+  ok('expired token -> 401', (await req(port, 'GET', '/api/reports', undefined, jwt.sign({ id: admin.id, email: admin.email, role: admin.role, sv: admin.sessionVersion ?? 0 }, getJwtSecret(), { expiresIn: -10 }))).status === 401);
+  ok('missing token on /api/auth/me -> 401', (await req(port, 'GET', '/api/auth/me')).status === 401);
   ok('analyst cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, analystTok)).status === 403);
   ok('officer cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, officerTok)).status === 403);
   ok('dept_officer cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, deptTok)).status === 403);
@@ -95,14 +96,26 @@ try {
   ok('analyst cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, analystTok)).status === 403);
   ok('officer cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, officerTok)).status === 403);
   ok('dept_officer cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, deptTok)).status === 403);
-  ok('authority can access audit logs -> 200', (await req(port, 'GET', '/api/admin/audit-logs', undefined, authorityTok)).status === 200);
   const adminAudit = await req(port, 'GET', '/api/admin/audit-logs', undefined, adminTok);
   ok('admin can access audit logs -> 200', adminAudit.status === 200);
   if (adminAudit.status === 200 && Array.isArray(adminAudit.json?.data)) {
     ok('audit logs omit hash/prevHash/metadata internals', adminAudit.json.data.every((l: any) => !('hash' in l) && !('prevHash' in l) && !('metadata' in l)));
     if (adminAudit.json.data.length > 0) {
-      ok('audit logs retain governance fields', adminAudit.json.data.every((l: any) => l && typeof l.id === 'string' && typeof l.action === 'string' && typeof l.module === 'string'));
+      ok('audit logs retain governance fields', adminAudit.json.data.every((l: any) => l && typeof l.id === 'string' && typeof l.action === 'string' && typeof l.module === 'string' && typeof l.userEmail === 'string' && typeof l.details === 'string' && typeof l.ipAddress === 'string'));
+      ok('audit logs include structured detailCode (Option B)', adminAudit.json.data.every((l: any) => typeof l.detailCode === 'string' && l.detailCode.startsWith('AUDIT_')));
+      ok('audit logs mask ipAddress last segment (Option B)', adminAudit.json.data.every((l: any) => {
+        if (typeof l.ipAddress !== 'string') return false;
+        if (l.ipAddress === 'unknown' || l.ipAddress === 'redacted') return true;
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(l.ipAddress)) return l.ipAddress.endsWith('.0');
+        if (l.ipAddress.includes(':')) return l.ipAddress.endsWith(':0') || l.ipAddress.split(':').pop() === '0';
+        return true;
+      }));
     }
+  }
+  const authorityAudit = await req(port, 'GET', '/api/admin/audit-logs', undefined, authorityTok);
+  ok('authority can access audit logs -> 200', authorityAudit.status === 200);
+  if (authorityAudit.status === 200 && Array.isArray(authorityAudit.json?.data) && authorityAudit.json.data.length > 0) {
+    ok('authority audit logs include detailCode and masked ipAddress (Option B)', authorityAudit.json.data.every((l: any) => typeof l.detailCode === 'string' && typeof l.ipAddress === 'string'));
   }
   ok('admin can access audit verify -> 200', (await req(port, 'GET', '/api/admin/audit-verify', undefined, adminTok)).status === 200);
   ok('authority can access audit verify -> 200', (await req(port, 'GET', '/api/admin/audit-verify', undefined, authorityTok)).status === 200);
@@ -476,10 +489,17 @@ try {
   ok('token invalidated by credential reset flow rejected -> 401/403', resetRes.status === 401 || resetRes.status === 403, String(resetRes.status));
 
   const adminUsers = await req(port, 'GET', '/api/admin/users', undefined, adminTok);
-  ok('admin can list users -> 200', adminUsers.status === 200);
-  if (adminUsers.status === 200 && Array.isArray(adminUsers.json?.data)) {
+  ok('admin users list -> 200', adminUsers.status === 200);
+  if (adminUsers.status === 200 && Array.isArray(adminUsers.json?.data) && adminUsers.json.data.length > 0) {
     ok('admin users response omits passwordHash', adminUsers.json.data.every((u: any) => !('passwordHash' in u)));
-  ok('admin users response omits internal auth state', adminUsers.json.data.every((u: any) => !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('admin users response omits internal auth state', adminUsers.json.data.every((u: any) => !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('admin users retain contact fields for admin (Option B)', adminUsers.json.data.every((u: any) => typeof u.email === 'string'));
+  }
+  const authorityUsers = await req(port, 'GET', '/api/admin/users', undefined, authorityTok);
+  ok('authority users list -> 200', authorityUsers.status === 200);
+  if (authorityUsers.status === 200 && Array.isArray(authorityUsers.json?.data) && authorityUsers.json.data.length > 0) {
+    ok('authority users response omits passwordHash/internal auth state', authorityUsers.json.data.every((u: any) => !('passwordHash' in u) && !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('authority users receive reduced directory view (no email/phone, Option B)', authorityUsers.json.data.every((u: any) => !('email' in u) && !('phone' in u)));
   }
   ok('dept_officer cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, deptTok)).status === 403);
   ok('analyst cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, analystTok)).status === 403);

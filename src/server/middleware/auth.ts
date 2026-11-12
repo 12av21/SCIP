@@ -2,7 +2,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { db } from '../../database/scipDatabase.ts';
+import { db } from '../../database/index.js';
 import { User, UserPermission, UserRole } from '../../types/scip.ts';
 
 const MIN_JWT_SECRET_LENGTH = 32;
@@ -130,7 +130,7 @@ export interface AuthenticatedRequest extends Request {
 }
 export const AuthenticatedRequest = {} as any;
 
-export function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export async function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({
@@ -144,7 +144,7 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, getJwtSecret()) as { id: string; email: string; role?: string; sv?: number };
-    const user = db.getUserById(decoded.id);
+    const user = await db.getUserById(decoded.id);
 
     if (!user) {
       res.status(401).json({
@@ -195,14 +195,14 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
 }
 
 export function requirePermission(permission: UserPermission) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {
       res.status(401).json({ success: false, message: 'Unauthenticated.' });
       return;
     }
 
     if (!hasPermission(req.user.role, permission)) {
-      db.logAudit({
+      await db.logAudit({
         action: 'SECURITY_EVENT',
         module: 'security',
         userId: req.user.id,

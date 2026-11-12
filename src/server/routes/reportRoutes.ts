@@ -1,7 +1,7 @@
-﻿// SCIP Backend - Report Management Routes
+// SCIP Backend - Report Management Routes
 
 import { Router, Response } from 'express';
-import { db } from '../../database/scipDatabase.js';
+import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
 import { Report, ReportCategory, ReportStatus, UrgencyLevel } from '../../types/scip.js';
 
@@ -20,15 +20,14 @@ const REPORT_CATEGORIES: ReportCategory[] = [
 const URGENCY_LEVELS: UrgencyLevel[] = ['low', 'medium', 'high', 'critical'];
 const CITIZEN_EDITABLE_STATUSES: ReportStatus[] = ['submitted', 'analyzed'];
 
-function canAccessReport(user: { role: string; id: string; departmentId?: string }, report: Report): boolean {
+async function canAccessReport(user: { role: string; id: string; departmentId?: string }, report: Report): Promise<boolean> {
   if (user.role === 'citizen') return report.citizenId === user.id;
   if (user.role === 'officer' || user.role === 'dept_officer') {
     if (!user.departmentId) return false;
     if (!report.incidentId) return false;
-    const incident = db.getIncidentById(report.incidentId);
+    const incident = await db.getIncidentById(report.incidentId);
     return Boolean(incident && incident.assignedDepartmentId === user.departmentId);
   }
-  // analyst, authority, admin: read access per permission; PII minimization handled at serialization/export layer
   return true;
 }
 
@@ -59,7 +58,7 @@ function pickCitizenUpdates(body: any): Partial<Report> {
 }
 
 // GET /api/reports
-router.get('/', authenticate, requirePermission('report.read'), (req: AuthenticatedRequest, res: Response): void => {
+router.get('/', authenticate, requirePermission('report.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { category, status, urgency, myOnly } = req.query;
 
   const filter: any = {};
@@ -71,7 +70,7 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
     filter.citizenId = req.user?.id;
   }
 
-  let reports = db.getReports(filter);
+  let reports = await db.getReports(filter);
 
   if (req.user?.role === 'officer' || req.user?.role === 'dept_officer') {
     const deptId = req.user.departmentId;
@@ -79,11 +78,13 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
       res.status(403).json({ success: false, message: 'Department assignment required.' });
       return;
     }
-    reports = reports.filter(r => {
-      if (!r.incidentId) return false;
-      const inc = db.getIncidentById(r.incidentId);
-      return Boolean(inc && inc.assignedDepartmentId === deptId);
-    });
+    const filtered: typeof reports = [];
+    for (const r of reports) {
+      if (!r.incidentId) continue;
+      const inc = await db.getIncidentById(r.incidentId);
+      if (inc && inc.assignedDepartmentId === deptId) filtered.push(r);
+    }
+    reports = filtered;
   }
 
   const data = reports.map(r => sanitizeReportForRole(req.user!.role, r));
@@ -91,15 +92,15 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
 });
 
 // GET /api/reports/:id
-router.get('/:id', authenticate, requirePermission('report.read'), (req: AuthenticatedRequest, res: Response): void => {
-  const report = db.getReportById(req.params.id);
+router.get('/:id', authenticate, requirePermission('report.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const report = await db.getReportById(req.params.id);
   if (!report) {
     res.status(404).json({ success: false, message: `Report ${req.params.id} not found.` });
     return;
   }
 
-  if (!canAccessReport(req.user!, report)) {
-    db.logAudit({
+  if (!(await canAccessReport(req.user!, report))) {
+    await db.logAudit({
       action: 'SECURITY_EVENT',
       module: 'security',
       recordId: report.id,
@@ -113,7 +114,7 @@ router.get('/:id', authenticate, requirePermission('report.read'), (req: Authent
     return;
   }
 
-  const analysis = db.getAIAnalysisForReport(req.params.id);
+  const analysis = await db.getAIAnalysisForReport(req.params.id);
   res.json({
     success: true,
     data: { report: sanitizeReportForRole(req.user!.role, report), analysis: analysis || null }
@@ -125,7 +126,7 @@ router.post(
   '/',
   authenticate,
   requirePermission('report.create'),
-  (req: AuthenticatedRequest, res: Response): void => {
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
         title,
@@ -140,11 +141,7 @@ router.post(
       } = req.body || {};
 
       if (typeof title !== 'string' || typeof description !== 'string' || typeof locationName !== 'string') {
-        res.status(400).json({
-          success: false,
-          message: 'Title, description, and location are required fields.',
-          errors: ['Missing mandatory fields.']
-        });
+        res.status(400).json({ success: false, message: 'Title, description, and location are required fields.', errors: ['Missing mandatory fields.'] });
         return;
       }
       const safeTitle = title.trim();
@@ -182,7 +179,7 @@ router.post(
       const safeImages = Array.isArray(images) ? images.filter((x: any) => typeof x === 'string' && x.length < 2048).slice(0, 10) : [];
 
       const user = req.user!;
-      const { report, analysis } = db.createReport({
+      const { report, analysis } = await db.createReport({
         title: safeTitle,
         description: safeDescription,
         category,
@@ -200,10 +197,7 @@ router.post(
       res.status(201).json({
         success: true,
         message: 'Report submitted and processed by SCIP intelligence pipeline.',
-        data: {
-          report,
-          analysis
-        }
+        data: { report, analysis }
       });
     } catch (err: any) {
       res.status(500).json({
@@ -216,15 +210,15 @@ router.post(
 );
 
 // PUT /api/reports/:id
-router.put('/:id', authenticate, requirePermission('report.update'), (req: AuthenticatedRequest, res: Response): void => {
+router.put('/:id', authenticate, requirePermission('report.update'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const existing = db.getReportById(req.params.id);
+    const existing = await db.getReportById(req.params.id);
     if (!existing) {
       res.status(404).json({ success: false, message: 'Report not found.' });
       return;
     }
-    if (!canAccessReport(user, existing)) {
+    if (!(await canAccessReport(user, existing))) {
       res.status(403).json({ success: false, message: 'Forbidden: not authorized to modify this report.' });
       return;
     }
@@ -249,7 +243,6 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
         return;
       }
     } else if (user.role === 'dept_officer' || user.role === 'authority' || user.role === 'admin') {
-      // Staff can only perform limited status workflow updates via allowlist; ownership/PII/system fields immutable here.
       const status = req.body?.status as ReportStatus | undefined;
       const allowedStaffStatuses: ReportStatus[] = ['under_review', 'assigned', 'resolved', 'closed'];
       if (status && allowedStaffStatuses.includes(status)) {
@@ -259,7 +252,7 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
         return;
       }
       if (user.role === 'dept_officer' && user.departmentId) {
-        const inc = existing.incidentId ? db.getIncidentById(existing.incidentId) : undefined;
+        const inc = existing.incidentId ? await db.getIncidentById(existing.incidentId) : undefined;
         if (!inc || inc.assignedDepartmentId !== user.departmentId) {
           res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' });
           return;
@@ -270,7 +263,7 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
       return;
     }
 
-    const updated = db.updateReport(req.params.id, updates, user);
+    const updated = await db.updateReport(req.params.id, updates, user);
     res.json({ success: true, message: 'Report updated successfully.', data: sanitizeReportForRole(user.role, updated) });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
@@ -279,10 +272,10 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
 });
 
 // DELETE /api/reports/:id (Withdraw report)
-router.delete('/:id', authenticate, requirePermission('report.update'), (req: AuthenticatedRequest, res: Response): void => {
+router.delete('/:id', authenticate, requirePermission('report.update'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const existing = db.getReportById(req.params.id);
+    const existing = await db.getReportById(req.params.id);
     if (!existing) {
       res.status(404).json({ success: false, message: 'Report not found.' });
       return;
@@ -299,7 +292,7 @@ router.delete('/:id', authenticate, requirePermission('report.update'), (req: Au
       res.status(400).json({ success: false, message: 'Report is already closed.' });
       return;
     }
-    const withdrawn = db.withdrawReport(req.params.id, user);
+    const withdrawn = await db.withdrawReport(req.params.id, user);
     res.json({ success: true, message: `Report ${req.params.id} has been withdrawn.`, data: sanitizeReportForRole(user.role, withdrawn) });
   } catch (err: any) {
     res.status(403).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message });
@@ -311,7 +304,7 @@ router.post(
   '/:id/reject',
   authenticate,
   requirePermission('incident.update'),
-  (req: AuthenticatedRequest, res: Response): void => {
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { reason } = req.body || {};
       if (typeof reason !== 'string' || !reason.trim()) {
@@ -323,13 +316,13 @@ router.post(
         return;
       }
 
-      const report = db.getReportById(req.params.id);
+      const report = await db.getReportById(req.params.id);
       if (!report) {
         res.status(404).json({ success: false, message: 'Report not found' });
         return;
       }
 
-      if (!canAccessReport(req.user!, report)) {
+      if (!(await canAccessReport(req.user!, report))) {
         res.status(403).json({ success: false, message: 'Forbidden.' });
         return;
       }
@@ -338,8 +331,8 @@ router.post(
         return;
       }
 
-      const updated = db.updateReport(req.params.id, { status: 'closed' }, req.user!);
-      db.createNotification({
+      const updated = await db.updateReport(req.params.id, { status: 'closed' }, req.user!);
+      await db.createNotification({
         userId: report.citizenId,
         title: 'Report Rejected by Authority',
         message: `Your report ${report.id} was reviewed and rejected. Reason: "${reason.trim().slice(0, 500)}"`,
@@ -347,7 +340,7 @@ router.post(
         link: report.id
       });
 
-      db.logAudit({
+      await db.logAudit({
         action: 'REPORT_REJECTED',
         module: 'reports',
         recordId: report.id,
@@ -370,27 +363,20 @@ router.post(
   '/:id/reanalyze',
   authenticate,
   requirePermission('intelligence.read'),
-  (req: AuthenticatedRequest, res: Response): void => {
-    const report = db.getReportById(req.params.id);
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const report = await db.getReportById(req.params.id);
     if (!report) {
       res.status(404).json({ success: false, message: 'Report not found' });
       return;
     }
-    if (!canAccessReport(req.user!, report)) {
+    if (!(await canAccessReport(req.user!, report))) {
       res.status(403).json({ success: false, message: 'Forbidden: not authorized to access this report.' });
       return;
     }
 
-    const freshAnalysis = db.runAndStoreAIAnalysis(report, true);
-    res.json({
-      success: true,
-      message: 'AI re-analysis completed.',
-      data: freshAnalysis
-    });
+    const freshAnalysis = await db.runAndStoreAIAnalysis(report, true);
+    res.json({ success: true, message: 'AI re-analysis completed.', data: freshAnalysis });
   }
 );
 
 export default router;
-
-
-
