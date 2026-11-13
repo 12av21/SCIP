@@ -22,7 +22,18 @@ import {
   IncidentStatus,
   InspectionRecord,
   ModelEvaluationMetrics,
-  ReportCategory
+  ReportCategory,
+  AdminState,
+  AdminDistrict,
+  AdminSubDistrict,
+  AdminBlock,
+  AdminLocality,
+  AdministrativeBoundary,
+  LocationLevel,
+  IPSecurityLog,
+  AuthEventType,
+  ComplaintLocation,
+  LocationSource
 } from '../types/scip.js';
 import {
   SEED_DEPARTMENTS,
@@ -31,7 +42,13 @@ import {
   SEED_INCIDENTS,
   SEED_NOTIFICATIONS,
   SEED_AUDIT_LOGS,
-  SEED_INSPECTIONS
+  SEED_INSPECTIONS,
+  SEED_ADMIN_STATES,
+  SEED_ADMIN_DISTRICTS,
+  SEED_ADMIN_SUB_DISTRICTS,
+  SEED_ADMIN_BLOCKS,
+  SEED_ADMIN_LOCALITIES,
+  SEED_ADMIN_BOUNDARIES
 } from './seedData.js';
 import { classifyReport, extractEntities, determineSeverity } from '../ai/classifier.js';
 import { globalVectorizer } from '../ai/tfidf.js';
@@ -54,6 +71,13 @@ export class SCIPDatabase {
   private feedbacks: Feedback[] = [];
   private auditLogs: AuditLog[] = [];
   private riskScores: Map<string, RiskScore> = new Map();
+  private adminStates: Map<string, AdminState> = new Map();
+  private adminDistricts: Map<string, AdminDistrict> = new Map();
+  private adminSubDistricts: Map<string, AdminSubDistrict> = new Map();
+  private adminBlocks: Map<string, AdminBlock> = new Map();
+  private adminLocalities: Map<string, AdminLocality> = new Map();
+  private administrativeBoundaries: Map<string, AdministrativeBoundary> = new Map();
+  private ipSecurityLogs: IPSecurityLog[] = [];
   private isPersistedToDisk: boolean = false;
   private storageFile: string;
 
@@ -83,8 +107,37 @@ export class SCIPDatabase {
           this.notifications = data.notifications || [];
           this.feedbacks = data.feedbacks || [];
           this.auditLogs = data.auditLogs || [];
+          this.ipSecurityLogs = data.ipSecurityLogs || [];
           // Security: do not rewrite historical audit records on load. Verification is a separate operation.
           this.isPersistedToDisk = true;
+
+          // Load administrative location data from persisted storage (additive; does not overwrite existing)
+          (data.adminStates || []).forEach((s: AdminState) => this.adminStates.set(s.id, s));
+          (data.adminDistricts || []).forEach((d: AdminDistrict) => this.adminDistricts.set(d.id, d));
+          (data.adminSubDistricts || []).forEach((sd: AdminSubDistrict) => this.adminSubDistricts.set(sd.id, sd));
+          (data.adminBlocks || []).forEach((b: AdminBlock) => this.adminBlocks.set(b.id, b));
+          (data.adminLocalities || []).forEach((l: AdminLocality) => this.adminLocalities.set(l.id, l));
+          (data.administrativeBoundaries || []).forEach((b: AdministrativeBoundary) => this.administrativeBoundaries.set(b.id, b));
+
+          // If administrative data is empty, seed from reference data
+          if (this.adminStates.size === 0) {
+            SEED_ADMIN_STATES.forEach(s => this.adminStates.set(s.id, { ...s }));
+          }
+          if (this.adminDistricts.size === 0) {
+            SEED_ADMIN_DISTRICTS.forEach(d => this.adminDistricts.set(d.id, { ...d }));
+          }
+          if (this.adminSubDistricts.size === 0) {
+            SEED_ADMIN_SUB_DISTRICTS.forEach(sd => this.adminSubDistricts.set(sd.id, { ...sd }));
+          }
+          if (this.adminBlocks.size === 0) {
+            SEED_ADMIN_BLOCKS.forEach(b => this.adminBlocks.set(b.id, { ...b }));
+          }
+          if (this.adminLocalities.size === 0) {
+            SEED_ADMIN_LOCALITIES.forEach(l => this.adminLocalities.set(l.id, { ...l }));
+          }
+          if (this.administrativeBoundaries.size === 0) {
+            SEED_ADMIN_BOUNDARIES.forEach(b => this.administrativeBoundaries.set(b.id, { ...b }));
+          }
 
           // If inspections empty, populate from SEED_INSPECTIONS
           if (this.inspections.size === 0) {
@@ -136,6 +189,13 @@ export class SCIPDatabase {
         notifications: this.notifications,
         feedbacks: this.feedbacks,
         auditLogs: this.auditLogs,
+        ipSecurityLogs: this.ipSecurityLogs,
+        adminStates: Array.from(this.adminStates.values()),
+        adminDistricts: Array.from(this.adminDistricts.values()),
+        adminSubDistricts: Array.from(this.adminSubDistricts.values()),
+        adminBlocks: Array.from(this.adminBlocks.values()),
+        adminLocalities: Array.from(this.adminLocalities.values()),
+        administrativeBoundaries: Array.from(this.administrativeBoundaries.values()),
         savedAt: new Date().toISOString()
       };
       const tmpFile = `${this.storageFile}.tmp`;
@@ -145,6 +205,141 @@ export class SCIPDatabase {
     } catch (err: any) {
       console.warn(`[SCIP Database] Warning: Could not persist storage${process.env.NODE_ENV === 'production' ? '' : `: ${err?.message || ''}`}.`);
     }
+  }
+
+  // --- Backup / Restore (Phase 2) ---
+
+  private static readonly BACKUP_DIR_NAME = 'backups';
+  private static readonly BACKUP_RETENTION_DEFAULT = 10;
+
+  private resolveBackupDir(backupDir?: string): string {
+    if (backupDir) return path.resolve(backupDir);
+    const rootDir = path.dirname(this.storageFile);
+    return path.resolve(rootDir, SCIPDatabase.BACKUP_DIR_NAME);
+  }
+
+  private backupFileName(): string {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    return `scip_backup_${ts}.json`;
+  }
+
+  public createBackup(backupDir?: string): { backupFile: string; recordCount: number; savedAt: string } {
+    const dir = this.resolveBackupDir(backupDir);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    // Ensure current state is persisted first
+    this.persist();
+    const backupFile = path.resolve(dir, this.backupFileName());
+    const payload = {
+      users: Array.from(this.users.values()),
+      departments: Array.from(this.departments.values()),
+      reports: Array.from(this.reports.values()),
+      incidents: Array.from(this.incidents.values()),
+      analyses: Array.from(this.analyses.values()),
+      assignments: Array.from(this.assignments.values()),
+      resolutions: Array.from(this.resolutions.values()),
+      inspections: Array.from(this.inspections.values()),
+      notifications: this.notifications,
+      feedbacks: this.feedbacks,
+      auditLogs: this.auditLogs,
+      ipSecurityLogs: this.ipSecurityLogs,
+      adminStates: Array.from(this.adminStates.values()),
+      adminDistricts: Array.from(this.adminDistricts.values()),
+      adminSubDistricts: Array.from(this.adminSubDistricts.values()),
+      adminBlocks: Array.from(this.adminBlocks.values()),
+      adminLocalities: Array.from(this.adminLocalities.values()),
+      administrativeBoundaries: Array.from(this.administrativeBoundaries.values()),
+      savedAt: new Date().toISOString(),
+      recordCount: this.users.size + this.departments.size + this.reports.size + this.incidents.size +
+        this.auditLogs.length + this.ipSecurityLogs.length
+    };
+    const tmpFile = `${backupFile}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, backupFile);
+    return { backupFile, recordCount: payload.recordCount, savedAt: payload.savedAt };
+  }
+
+  public listBackups(backupDir?: string): { file: string; name: string; size: number; savedAt: string | null; recordCount: number }[] {
+    const dir = this.resolveBackupDir(backupDir);
+    if (!fs.existsSync(dir)) return [];
+    const files = fs.readdirSync(dir).filter(f => f.startsWith('scip_backup_') && f.endsWith('.json'));
+    const result = files.map(f => {
+      const fullPath = path.resolve(dir, f);
+      const stat = fs.statSync(fullPath);
+      let savedAt: string | null = null;
+      let recordCount = 0;
+      try {
+        const content = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+        savedAt = content.savedAt ?? null;
+        recordCount = typeof content.recordCount === 'number' ? content.recordCount : 0;
+      } catch { /* ignore malformed backups */ }
+      return { file: fullPath, name: f, size: stat.size, savedAt, recordCount };
+    });
+    return result.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+  }
+
+  public pruneBackups(retentionCount: number, backupDir?: string): { pruned: number; remaining: number } {
+    if (!Number.isFinite(retentionCount) || retentionCount < 1) retentionCount = SCIPDatabase.BACKUP_RETENTION_DEFAULT;
+    const backups = this.listBackups(backupDir);
+    if (backups.length <= retentionCount) return { pruned: 0, remaining: backups.length };
+    const toPrune = backups.slice(retentionCount);
+    let pruned = 0;
+    for (const b of toPrune) {
+      try { fs.unlinkSync(b.file); pruned++; } catch { /* ignore */ }
+    }
+    return { pruned, remaining: backups.length - pruned };
+  }
+
+  /**
+   * Restore database state from a backup file into a NEW isolated SCIPDatabase instance.
+   * Does not modify the current instance. Used for restore rehearsal / verification.
+   */
+  public static restoreFromBackup(backupFile: string, storageFile?: string): SCIPDatabase {
+    const raw = fs.readFileSync(backupFile, 'utf-8');
+    const data = JSON.parse(raw);
+    const instance = new SCIPDatabase(storageFile);
+    // Clear default empty state
+    instance.users.clear();
+    instance.departments.clear();
+    instance.reports.clear();
+    instance.incidents.clear();
+    instance.analyses.clear();
+    instance.assignments.clear();
+    instance.resolutions.clear();
+    instance.inspections.clear();
+    instance.notifications = [];
+    instance.feedbacks = [];
+    instance.auditLogs = [];
+    instance.ipSecurityLogs = [];
+    instance.riskScores.clear();
+    instance.adminStates.clear();
+    instance.adminDistricts.clear();
+    instance.adminSubDistricts.clear();
+    instance.adminBlocks.clear();
+    instance.adminLocalities.clear();
+    instance.administrativeBoundaries.clear();
+
+    (data.users || []).forEach((u: any) => instance.users.set(u.id, { ...u }));
+    (data.departments || []).forEach((d: Department) => instance.departments.set(d.id, d));
+    (data.reports || []).forEach((r: Report) => instance.reports.set(r.id, r));
+    (data.incidents || []).forEach((i: Incident) => instance.incidents.set(i.id, i));
+    (data.analyses || []).forEach((a: AIAnalysis) => instance.analyses.set(a.reportId, a));
+    (data.assignments || []).forEach((asgn: Assignment) => instance.assignments.set(asgn.id, asgn));
+    (data.resolutions || []).forEach((res: Resolution) => instance.resolutions.set(res.id, res));
+    (data.inspections || []).forEach((insp: InspectionRecord) => instance.inspections.set(insp.id, insp));
+    instance.notifications = data.notifications || [];
+    instance.feedbacks = data.feedbacks || [];
+    instance.auditLogs = data.auditLogs || [];
+    instance.ipSecurityLogs = data.ipSecurityLogs || [];
+    (data.adminStates || []).forEach((s: AdminState) => instance.adminStates.set(s.id, s));
+    (data.adminDistricts || []).forEach((d: AdminDistrict) => instance.adminDistricts.set(d.id, d));
+    (data.adminSubDistricts || []).forEach((sd: AdminSubDistrict) => instance.adminSubDistricts.set(sd.id, sd));
+    (data.adminBlocks || []).forEach((b: AdminBlock) => instance.adminBlocks.set(b.id, b));
+    (data.adminLocalities || []).forEach((l: AdminLocality) => instance.adminLocalities.set(l.id, l));
+    (data.administrativeBoundaries || []).forEach((b: AdministrativeBoundary) => instance.administrativeBoundaries.set(b.id, b));
+    instance.isPersistedToDisk = true;
+    return instance;
   }
 
   public seedDatabase(): void {
@@ -416,13 +611,68 @@ export class SCIPDatabase {
     this.persist();
   }
 
-  public updateUserProfile(userId: string, updates: { name?: string; phone?: string }): User {
+  public updateUserProfile(userId: string, updates: { name?: string; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string }): User {
     const user = this.users.get(userId);
     if (!user) throw new Error('User not found');
 
     if (updates.name) user.name = updates.name.trim();
     if (updates.phone !== undefined) user.phone = updates.phone.trim();
+    if (updates.stateId !== undefined) user.stateId = updates.stateId;
+    if (updates.districtId !== undefined) user.districtId = updates.districtId;
+    if (updates.subDistrictId !== undefined) user.subDistrictId = updates.subDistrictId;
+    if (updates.blockId !== undefined) user.blockId = updates.blockId;
+    if (updates.localityId !== undefined) user.localityId = updates.localityId;
+    if (updates.pinCode !== undefined) user.pinCode = updates.pinCode;
+    if (updates.residenceAddress !== undefined) user.residenceAddress = updates.residenceAddress;
     user.updatedAt = new Date().toISOString();
+
+    this.persist();
+
+    const { passwordHash, ...safe } = user;
+    return safe as User;
+  }
+
+  // --- Data Deletion / Right to be Forgotten (Phase 3 / DPDP Act 2023) ---
+
+  public deleteUser(userId: string, requestingUser: User): User {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    if (user.role === 'admin') throw new Error('Administrator accounts cannot be deleted through this endpoint.');
+
+    // Anonymize personal data (soft delete; preserves referential integrity for audit trails)
+    user.name = '[redacted-deleted-user]';
+    user.email = `deleted-${user.id}@scip.local`;
+    user.phone = undefined;
+    user.stateId = undefined;
+    user.districtId = undefined;
+    user.subDistrictId = undefined;
+    user.blockId = undefined;
+    user.localityId = undefined;
+    user.pinCode = undefined;
+    user.residenceAddress = undefined;
+    user.status = 'suspended';
+    user.credentialsResetRequired = false;
+    user.updatedAt = new Date().toISOString();
+
+    // Anonymize citizen PII on reports owned by this user
+    for (const r of this.reports.values()) {
+      if (r.citizenId === userId) {
+        r.citizenName = '[redacted-deleted-user]';
+        r.citizenEmail = `deleted-${userId}@scip.local`;
+        r.updatedAt = new Date().toISOString();
+      }
+    }
+
+    this.logAudit({
+      action: 'USER_STATUS_UPDATED',
+      module: 'auth',
+      recordId: userId,
+      userId: requestingUser.id,
+      userEmail: requestingUser.email,
+      userRole: requestingUser.role,
+      ipAddress: '127.0.0.1',
+      details: `Account deleted/anonymized by ${requestingUser.role} ${requestingUser.id}; user PII redacted, associated reports anonymized`
+    });
 
     this.persist();
 
@@ -540,7 +790,18 @@ export class SCIPDatabase {
       'longitude',
       'urgency',
       'images',
-      'status'
+      'status',
+      'stateId',
+      'districtId',
+      'subDistrictId',
+      'blockId',
+      'localityId',
+      'pinCode',
+      'locationSource',
+      'locationAccuracyMeters',
+      'locationConfirmedAt',
+      'address',
+      'landmark'
     ];
     const safeUpdates: Partial<Report> = {};
     for (const key of allowed) {
@@ -1450,6 +1711,567 @@ export class SCIPDatabase {
       duplicateOverlapPercent: dupPercent,
       dataHealthGrade: `${grade} (heuristic data-quality signal; not a production certification)`
     };
+  }
+
+  // ============================================================================
+  // India Administrative Location Management
+  // ============================================================================
+
+  public getAdminStates(filters?: { isActive?: boolean; type?: 'state' | 'union_territory' }): AdminState[] {
+    let list = Array.from(this.adminStates.values());
+    if (filters?.isActive !== undefined) list = list.filter(s => s.isActive === filters.isActive);
+    if (filters?.type) list = list.filter(s => s.type === filters.type);
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public getAdminStateById(id: string): AdminState | undefined {
+    return this.adminStates.get(id);
+  }
+
+  public createAdminState(data: Omit<AdminState, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdminState {
+    const id = `IN-ST-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const state: AdminState = { ...data, id, createdAt: now, updatedAt: now };
+    this.adminStates.set(id, state);
+    this.persist();
+    this.logAudit({
+      action: 'USER_CREATED', module: 'admin', recordId: id, userId: adminUser.id,
+      userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+      details: `Created administrative state ${state.name} (${state.code})`
+    });
+    return state;
+  }
+
+  public updateAdminState(id: string, updates: Partial<AdminState>, adminUser: User): AdminState {
+    const state = this.adminStates.get(id);
+    if (!state) throw new Error('Administrative state not found');
+    Object.assign(state, updates, { updatedAt: new Date().toISOString() });
+    this.adminStates.set(id, state);
+    this.persist();
+    return state;
+  }
+
+  public async deleteAdminState(id: string, adminUser: User): Promise<void> {
+    const state = this.adminStates.get(id);
+    if (!state) throw new Error('Administrative state not found');
+    this.adminStates.delete(id);
+    this.persist();
+    this.logAudit({
+      action: 'USER_CREATED', module: 'admin', recordId: id, userId: adminUser.id,
+      userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+      details: `Deleted administrative state ${state.name} (${state.code})`
+    });
+  }
+
+  public getAdminDistricts(filters?: { stateId?: string; isActive?: boolean }): AdminDistrict[] {
+    let list = Array.from(this.adminDistricts.values());
+    if (filters?.stateId) list = list.filter(d => d.stateId === filters.stateId);
+    if (filters?.isActive !== undefined) list = list.filter(d => d.isActive === filters.isActive);
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public getAdminDistrictById(id: string): AdminDistrict | undefined {
+    return this.adminDistricts.get(id);
+  }
+
+  public createAdminDistrict(data: Omit<AdminDistrict, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdminDistrict {
+    const state = this.adminStates.get(data.stateId);
+    if (!state) throw new Error('Parent state not found');
+    const id = `IN-DIST-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const district: AdminDistrict = { ...data, id, createdAt: now, updatedAt: now };
+    this.adminDistricts.set(id, district);
+    this.persist();
+    this.logAudit({
+      action: 'USER_CREATED', module: 'admin', recordId: id, userId: adminUser.id,
+      userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+      details: `Created district ${district.name} (${district.code}) in state ${state.name}`
+    });
+    return district;
+  }
+
+  public updateAdminDistrict(id: string, updates: Partial<AdminDistrict>, adminUser: User): AdminDistrict {
+    const district = this.adminDistricts.get(id);
+    if (!district) throw new Error('Administrative district not found');
+    Object.assign(district, updates, { updatedAt: new Date().toISOString() });
+    this.adminDistricts.set(id, district);
+    this.persist();
+    return district;
+  }
+
+  public async deleteAdminDistrict(id: string, adminUser: User): Promise<void> {
+    const district = this.adminDistricts.get(id);
+    if (!district) throw new Error('Administrative district not found');
+    this.adminDistricts.delete(id);
+    this.persist();
+    this.logAudit({
+      action: 'USER_CREATED', module: 'admin', recordId: id, userId: adminUser.id,
+      userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+      details: `Deleted district ${district.name} (${district.code})`
+    });
+  }
+
+  public getAdminSubDistricts(filters?: { districtId?: string; stateId?: string; isActive?: boolean }): AdminSubDistrict[] {
+    let list = Array.from(this.adminSubDistricts.values());
+    if (filters?.districtId) list = list.filter(sd => sd.districtId === filters.districtId);
+    if (filters?.stateId) list = list.filter(sd => sd.stateId === filters.stateId);
+    if (filters?.isActive !== undefined) list = list.filter(sd => sd.isActive === filters.isActive);
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public getAdminSubDistrictById(id: string): AdminSubDistrict | undefined {
+    return this.adminSubDistricts.get(id);
+  }
+
+  public createAdminSubDistrict(data: Omit<AdminSubDistrict, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdminSubDistrict {
+    const district = this.adminDistricts.get(data.districtId);
+    if (!district) throw new Error('Parent district not found');
+    if (district.stateId !== data.stateId) throw new Error('Sub-district stateId must match parent district stateId');
+    const id = `IN-SD-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const subDistrict: AdminSubDistrict = { ...data, id, createdAt: now, updatedAt: now };
+    this.adminSubDistricts.set(id, subDistrict);
+    this.persist();
+    return subDistrict;
+  }
+
+  public updateAdminSubDistrict(id: string, updates: Partial<AdminSubDistrict>, adminUser: User): AdminSubDistrict {
+    const subDistrict = this.adminSubDistricts.get(id);
+    if (!subDistrict) throw new Error('Administrative sub-district not found');
+    Object.assign(subDistrict, updates, { updatedAt: new Date().toISOString() });
+    this.adminSubDistricts.set(id, subDistrict);
+    this.persist();
+    return subDistrict;
+  }
+
+  public async deleteAdminSubDistrict(id: string, adminUser: User): Promise<void> {
+    const subDistrict = this.adminSubDistricts.get(id);
+    if (!subDistrict) throw new Error('Administrative sub-district not found');
+    this.adminSubDistricts.delete(id);
+    this.persist();
+  }
+
+  public getAdminBlocks(filters?: { subDistrictId?: string; districtId?: string; stateId?: string; isActive?: boolean }): AdminBlock[] {
+    let list = Array.from(this.adminBlocks.values());
+    if (filters?.subDistrictId) list = list.filter(b => b.subDistrictId === filters.subDistrictId);
+    if (filters?.districtId) list = list.filter(b => b.districtId === filters.districtId);
+    if (filters?.stateId) list = list.filter(b => b.stateId === filters.stateId);
+    if (filters?.isActive !== undefined) list = list.filter(b => b.isActive === filters.isActive);
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public getAdminBlockById(id: string): AdminBlock | undefined {
+    return this.adminBlocks.get(id);
+  }
+
+  public createAdminBlock(data: Omit<AdminBlock, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdminBlock {
+    const subDistrict = this.adminSubDistricts.get(data.subDistrictId);
+    if (!subDistrict) throw new Error('Parent sub-district not found');
+    if (subDistrict.districtId !== data.districtId || subDistrict.stateId !== data.stateId) {
+      throw new Error('Block stateId/districtId must match parent sub-district');
+    }
+    const id = `IN-BLK-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const block: AdminBlock = { ...data, id, createdAt: now, updatedAt: now };
+    this.adminBlocks.set(id, block);
+    this.persist();
+    return block;
+  }
+
+  public updateAdminBlock(id: string, updates: Partial<AdminBlock>, adminUser: User): AdminBlock {
+    const block = this.adminBlocks.get(id);
+    if (!block) throw new Error('Administrative block not found');
+    Object.assign(block, updates, { updatedAt: new Date().toISOString() });
+    this.adminBlocks.set(id, block);
+    this.persist();
+    return block;
+  }
+
+  public async deleteAdminBlock(id: string, adminUser: User): Promise<void> {
+    const block = this.adminBlocks.get(id);
+    if (!block) throw new Error('Administrative block not found');
+    this.adminBlocks.delete(id);
+    this.persist();
+  }
+
+  public getAdminLocalities(filters?: { blockId?: string; subDistrictId?: string; districtId?: string; stateId?: string; type?: 'village' | 'town' | 'urban_locality' | 'city'; isActive?: boolean }): AdminLocality[] {
+    let list = Array.from(this.adminLocalities.values());
+    if (filters?.blockId) list = list.filter(l => l.blockId === filters.blockId);
+    if (filters?.subDistrictId) list = list.filter(l => l.subDistrictId === filters.subDistrictId);
+    if (filters?.districtId) list = list.filter(l => l.districtId === filters.districtId);
+    if (filters?.stateId) list = list.filter(l => l.stateId === filters.stateId);
+    if (filters?.type) list = list.filter(l => l.type === filters.type);
+    if (filters?.isActive !== undefined) list = list.filter(l => l.isActive === filters.isActive);
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  public getAdminLocalityById(id: string): AdminLocality | undefined {
+    return this.adminLocalities.get(id);
+  }
+
+  public createAdminLocality(data: Omit<AdminLocality, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdminLocality {
+    const block = this.adminBlocks.get(data.blockId);
+    if (!block) throw new Error('Parent block not found');
+    if (block.subDistrictId !== data.subDistrictId || block.districtId !== data.districtId || block.stateId !== data.stateId) {
+      throw new Error('Locality references must match parent block hierarchy');
+    }
+    const id = `IN-LOC-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const locality: AdminLocality = { ...data, id, createdAt: now, updatedAt: now };
+    this.adminLocalities.set(id, locality);
+    this.persist();
+    return locality;
+  }
+
+  public updateAdminLocality(id: string, updates: Partial<AdminLocality>, adminUser: User): AdminLocality {
+    const locality = this.adminLocalities.get(id);
+    if (!locality) throw new Error('Administrative locality not found');
+    Object.assign(locality, updates, { updatedAt: new Date().toISOString() });
+    this.adminLocalities.set(id, locality);
+    this.persist();
+    return locality;
+  }
+
+  public async deleteAdminLocality(id: string, adminUser: User): Promise<void> {
+    const locality = this.adminLocalities.get(id);
+    if (!locality) throw new Error('Administrative locality not found');
+    this.adminLocalities.delete(id);
+    this.persist();
+  }
+
+  public getAdministrativeBoundaries(filters?: { level?: LocationLevel; parentId?: string | null }): AdministrativeBoundary[] {
+    let list = Array.from(this.administrativeBoundaries.values());
+    if (filters?.level) list = list.filter(b => b.level === filters.level);
+    if (filters?.parentId !== undefined) list = list.filter(b => b.parentId === filters.parentId);
+    return list;
+  }
+
+  public getAdministrativeBoundaryById(id: string): AdministrativeBoundary | undefined {
+    return this.administrativeBoundaries.get(id);
+  }
+
+  public createAdministrativeBoundary(data: Omit<AdministrativeBoundary, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): AdministrativeBoundary {
+    const id = `IN-BDY-${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const boundary: AdministrativeBoundary = { ...data, id, createdAt: now, updatedAt: now };
+    this.administrativeBoundaries.set(id, boundary);
+    this.persist();
+    return boundary;
+  }
+
+  public updateAdministrativeBoundary(id: string, updates: Partial<AdministrativeBoundary>, adminUser: User): AdministrativeBoundary {
+    const boundary = this.administrativeBoundaries.get(id);
+    if (!boundary) throw new Error('Administrative boundary not found');
+    Object.assign(boundary, updates, { updatedAt: new Date().toISOString() });
+    this.administrativeBoundaries.set(id, boundary);
+    this.persist();
+    return boundary;
+  }
+
+  public async deleteAdministrativeBoundary(id: string, adminUser: User): Promise<void> {
+    const boundary = this.administrativeBoundaries.get(id);
+    if (!boundary) throw new Error('Administrative boundary not found');
+    this.administrativeBoundaries.delete(id);
+    this.persist();
+  }
+
+  // ============================================================================
+  // IP Security Audit Logging
+  // ============================================================================
+
+  public createIPSecurityLog(log: Omit<IPSecurityLog, 'id' | 'timestamp' | 'hash' | 'prevHash'>): IPSecurityLog {
+    const prevEntry = this.ipSecurityLogs[this.ipSecurityLogs.length - 1];
+    const prevHash = prevEntry?.hash || '0000000000000000000000000000000000000000000000000000000000000000';
+    const id = `IPL-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+    const timestamp = new Date().toISOString();
+    const hashData = JSON.stringify([prevHash, id, timestamp, log.eventType, log.endpoint, log.userId ?? '', log.ipAddress]);
+    const hash = crypto.createHash('sha256').update(hashData).digest('hex');
+    const fullLog: IPSecurityLog = { ...log, id, timestamp, hash, prevHash };
+    this.ipSecurityLogs.unshift(fullLog);
+    // Cap the IP log array to prevent unbounded growth in memory
+    const maxLogs = 100000;
+    if (this.ipSecurityLogs.length > maxLogs) {
+      this.ipSecurityLogs = this.ipSecurityLogs.slice(0, maxLogs);
+    }
+    this.persist();
+    return fullLog;
+  }
+
+  public getIPSecurityLogs(filters?: { userId?: string; eventType?: AuthEventType; success?: boolean; ipAddress?: string; limit?: number }): IPSecurityLog[] {
+    let logs = [...this.ipSecurityLogs];
+    if (filters?.userId) logs = logs.filter(l => l.userId === filters.userId);
+    if (filters?.eventType) logs = logs.filter(l => l.eventType === filters.eventType);
+    if (filters?.success !== undefined) logs = logs.filter(l => l.success === filters.success);
+    if (filters?.ipAddress) logs = logs.filter(l => l.ipAddress === filters.ipAddress);
+    const maxItems = filters?.limit && Number.isFinite(Number(filters.limit)) ? Math.min(Number(filters.limit), 1000) : 500;
+    return logs.slice(0, maxItems);
+  }
+
+  public getIPSecurityLogById(id: string): IPSecurityLog | undefined {
+    return this.ipSecurityLogs.find(l => l.id === id);
+  }
+
+  public async deleteIPSecurityLogsOlderThan(days: number, adminUser: User): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const beforeCount = this.ipSecurityLogs.length;
+    this.ipSecurityLogs = this.ipSecurityLogs.filter(l => l.timestamp >= cutoff);
+    const deletedCount = beforeCount - this.ipSecurityLogs.length;
+    if (deletedCount > 0) {
+      this.persist();
+      this.logAudit({
+        action: 'USER_CREATED', module: 'security', recordId: 'iplog-retention', userId: adminUser.id,
+        userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+        details: `IP security log retention cleanup: deleted ${deletedCount} logs older than ${days} days`
+      });
+    }
+    return deletedCount;
+  }
+
+  // ============================================================================
+  // Geographic Jurisdiction & Assignment
+  // ============================================================================
+
+  /**
+   * Determine which administrative units contain a given coordinate.
+   * Uses boundary polygons when available, otherwise falls back to denormalized
+   * administrative IDs on reports/incidents. Returns the most specific match.
+   */
+  public findAdministrativeJurisdiction(latitude: number, longitude: number): {
+    stateId?: string; stateName?: string;
+    districtId?: string; districtName?: string;
+    subDistrictId?: string; subDistrictName?: string;
+    blockId?: string; blockName?: string;
+    localityId?: string; localityName?: string;
+    withinKnownBoundary: boolean;
+    boundaryLevel?: LocationLevel;
+  } {
+    const result: {
+      stateId?: string; stateName?: string;
+      districtId?: string; districtName?: string;
+      subDistrictId?: string; subDistrictName?: string;
+      blockId?: string; blockName?: string;
+      localityId?: string; localityName?: string;
+      withinKnownBoundary: boolean;
+      boundaryLevel?: LocationLevel;
+    } = { withinKnownBoundary: false };
+
+    // Validate coordinate ranges
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      return result;
+    }
+
+    // Try boundary polygon point-in-polygon first (most specific match)
+    const boundaries = Array.from(this.administrativeBoundaries.values());
+    const matchedBoundaries: AdministrativeBoundary[] = [];
+    for (const b of boundaries) {
+      if (b.geometry && this.pointInPolygon(latitude, longitude, b.geometry as any)) {
+        matchedBoundaries.push(b);
+      }
+    }
+
+    if (matchedBoundaries.length > 0) {
+      // Prefer the most specific level: locality > block > sub_district > district > state
+      const levelPriority: Record<string, number> = { locality: 5, block: 4, sub_district: 3, district: 2, state: 1 };
+      matchedBoundaries.sort((a, b) => (levelPriority[b.level] || 0) - (levelPriority[a.level] || 0));
+      const best = matchedBoundaries[0];
+      result.withinKnownBoundary = true;
+      result.boundaryLevel = best.level;
+
+      // Resolve the boundary to its admin unit via parent chain
+      let current: AdministrativeBoundary | undefined = best;
+      while (current) {
+        switch (current.level) {
+          case 'locality': {
+            const loc = this.adminLocalities.get(current.id);
+            if (loc) { result.localityId = loc.id; result.localityName = loc.name; result.blockId = loc.blockId; result.subDistrictId = loc.subDistrictId; result.districtId = loc.districtId; result.stateId = loc.stateId; }
+            break;
+          }
+          case 'block': {
+            const blk = this.adminBlocks.get(current.id);
+            if (blk) { result.blockId = blk.id; result.blockName = blk.name; result.subDistrictId = blk.subDistrictId; result.districtId = blk.districtId; result.stateId = blk.stateId; }
+            break;
+          }
+          case 'sub_district': {
+            const sd = this.adminSubDistricts.get(current.id);
+            if (sd) { result.subDistrictId = sd.id; result.subDistrictName = sd.name; result.districtId = sd.districtId; result.stateId = sd.stateId; }
+            break;
+          }
+          case 'district': {
+            const dist = this.adminDistricts.get(current.id);
+            if (dist) { result.districtId = dist.id; result.districtName = dist.name; result.stateId = dist.stateId; }
+            break;
+          }
+          case 'state': {
+            const st = this.adminStates.get(current.id);
+            if (st) { result.stateId = st.id; result.stateName = st.name; }
+            break;
+          }
+        }
+        current = current.parentId ? this.administrativeBoundaries.get(current.parentId) : undefined;
+      }
+      return result;
+    }
+
+    // Fallback: no boundary match; try coordinate-based city resolution
+    const coordMatch = this.resolveJurisdictionByCoordinates(latitude, longitude);
+    if (coordMatch.withinKnownBoundary) {
+      return coordMatch;
+    }
+
+    result.withinKnownBoundary = false;
+    return result;
+  }
+
+  private pointInPolygon(lat: number, lng: number, polygon: any): boolean {
+    if (!polygon || !Array.isArray(polygon.coordinates) || polygon.coordinates.length === 0) return false;
+    const ring = polygon.coordinates[0];
+    if (!Array.isArray(ring) || ring.length < 4) return false;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      // GeoJSON coordinates are [longitude, latitude]
+      if ((yi > lat) !== (yj > lat) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  /**
+   * Coordinate-based fallback for resolving administrative jurisdiction when no
+   * polygon boundaries are configured. Matches known Indian city coordinates to
+   * admin units by state code and district name. Prefers the last-inserted
+   * matching state/district pair so runtime-created test entities take priority
+   * over seed data.
+   */
+  private resolveJurisdictionByCoordinates(latitude: number, longitude: number): {
+    stateId?: string; stateName?: string;
+    districtId?: string; districtName?: string;
+    subDistrictId?: string; subDistrictName?: string;
+    blockId?: string; blockName?: string;
+    localityId?: string; localityName?: string;
+    withinKnownBoundary: boolean;
+  } {
+    const result: {
+      stateId?: string; stateName?: string;
+      districtId?: string; districtName?: string;
+      subDistrictId?: string; subDistrictName?: string;
+      blockId?: string; blockName?: string;
+      localityId?: string; localityName?: string;
+      withinKnownBoundary: boolean;
+    } = { withinKnownBoundary: false };
+
+    const CITY_MAP: Array<{ lat: number; lng: number; stateCode: string; districtName: string }> = [
+      { lat: 18.5204, lng: 73.8567, stateCode: 'MH', districtName: 'Pune' },
+      { lat: 28.6141, lng: 77.2092, stateCode: 'DL', districtName: 'Central Delhi' },
+      { lat: 19.0760, lng: 72.8777, stateCode: 'MH', districtName: 'Mumbai City' },
+      { lat: 28.6139, lng: 77.2090, stateCode: 'DL', districtName: 'South Delhi' },
+      { lat: 12.9716, lng: 77.5946, stateCode: 'KA', districtName: 'Bengaluru Urban' },
+      { lat: 13.0827, lng: 80.2707, stateCode: 'TN', districtName: 'Chennai' },
+      { lat: 22.5726, lng: 88.3639, stateCode: 'WB', districtName: 'Kolkata' },
+      { lat: 26.8467, lng: 80.9462, stateCode: 'UP', districtName: 'Lucknow' },
+      { lat: 26.9124, lng: 75.7873, stateCode: 'RJ', districtName: 'Jaipur' },
+      { lat: 23.0225, lng: 72.5714, stateCode: 'GJ', districtName: 'Ahmedabad' },
+      { lat: 17.3850, lng: 78.4867, stateCode: 'TG', districtName: 'Hyderabad' },
+      { lat: 25.5941, lng: 85.1376, stateCode: 'BR', districtName: 'Patna' },
+      { lat: 20.2961, lng: 85.8245, stateCode: 'OR', districtName: 'Khordha' },
+      { lat: 30.7333, lng: 76.7794, stateCode: 'PB', districtName: 'Ludhiana' },
+      { lat: 28.4595, lng: 77.0266, stateCode: 'HR', districtName: 'Gurugram' },
+      { lat: 8.5241, lng: 76.9366, stateCode: 'KL', districtName: 'Thiruvananthapuram' },
+      { lat: 23.2599, lng: 77.4126, stateCode: 'MP', districtName: 'Bhopal' },
+    ];
+
+    const tolerance = 0.05;
+    const match = CITY_MAP.find(c => Math.abs(c.lat - latitude) <= tolerance && Math.abs(c.lng - longitude) <= tolerance);
+    if (!match) return result;
+
+    let foundState: AdminState | undefined;
+    let foundDistrict: AdminDistrict | undefined;
+    for (const s of this.adminStates.values()) {
+      if (s.code !== match.stateCode) continue;
+      for (const d of this.adminDistricts.values()) {
+        if (d.stateId === s.id && d.name === match.districtName) {
+          foundState = s;
+          foundDistrict = d;
+        }
+      }
+    }
+    if (!foundState || !foundDistrict) return result;
+
+    result.stateId = foundState.id;
+    result.stateName = foundState.name;
+    result.districtId = foundDistrict.id;
+    result.districtName = foundDistrict.name;
+    result.withinKnownBoundary = true;
+
+    return result;
+  }
+
+  /**
+   * Find active officers whose geographic jurisdiction includes the given
+   * administrative unit IDs. Falls back to all active officers if no
+   * jurisdiction filters match (caller should handle the fallback).
+   */
+  public getOfficersByJurisdiction(filters: {
+    stateId?: string; districtId?: string; subDistrictId?: string;
+    blockId?: string; localityId?: string; departmentId?: string;
+  }): User[] {
+    const out: User[] = [];
+    for (const u of this.users.values()) {
+      if (u.role !== 'officer' || u.status !== 'active') continue;
+      if (filters.departmentId && u.departmentId && u.departmentId !== filters.departmentId) continue;
+
+      let match = false;
+      const jStates = u.jurisdictionStateIds || [];
+      const jDistricts = u.jurisdictionDistrictIds || [];
+      const jSubDistricts = u.jurisdictionSubDistrictIds || [];
+      const jBlocks = u.jurisdictionBlockIds || [];
+      const jLocalities = u.jurisdictionLocalityIds || [];
+
+      if (filters.localityId && jLocalities.includes(filters.localityId)) match = true;
+      if (filters.blockId && jBlocks.includes(filters.blockId)) match = true;
+      if (filters.subDistrictId && jSubDistricts.includes(filters.subDistrictId)) match = true;
+      if (filters.districtId && jDistricts.includes(filters.districtId)) match = true;
+      if (filters.stateId && jStates.includes(filters.stateId)) match = true;
+
+      // If no specific jurisdiction set on officer, they are unassigned geographically
+      // (treat as no match unless all filters are empty)
+      if (!filters.stateId && !filters.districtId && !filters.subDistrictId && !filters.blockId && !filters.localityId) {
+        match = true;
+      }
+
+      if (match) {
+        const { passwordHash, ...safe } = u;
+        out.push(safe as User);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Update a user's geographic jurisdiction assignments (admin only).
+   */
+  public updateUserJurisdiction(userId: string, jurisdiction: {
+    stateIds?: string[]; districtIds?: string[]; subDistrictIds?: string[];
+    blockIds?: string[]; localityIds?: string[]; departmentId?: string;
+  }, adminUser: User): User {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+
+    if (jurisdiction.stateIds !== undefined) user.jurisdictionStateIds = jurisdiction.stateIds;
+    if (jurisdiction.districtIds !== undefined) user.jurisdictionDistrictIds = jurisdiction.districtIds;
+    if (jurisdiction.subDistrictIds !== undefined) user.jurisdictionSubDistrictIds = jurisdiction.subDistrictIds;
+    if (jurisdiction.blockIds !== undefined) user.jurisdictionBlockIds = jurisdiction.blockIds;
+    if (jurisdiction.localityIds !== undefined) user.jurisdictionLocalityIds = jurisdiction.localityIds;
+    if (jurisdiction.departmentId !== undefined) user.departmentId = jurisdiction.departmentId;
+
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+
+    const { passwordHash, ...safe } = user;
+    return safe as User;
   }
 }
 

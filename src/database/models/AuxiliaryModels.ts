@@ -289,3 +289,226 @@ const RiskScoreSchema = new Schema<IRiskScoreDocument>({
 });
 
 export const RiskScoreModel = mongoose.models.RiskScore || mongoose.model<IRiskScoreDocument>('RiskScore', RiskScoreSchema);
+
+// --- Counter (internal, for concurrency-safe ID generation in Mongo runtime) ---
+export interface ICounterDocument extends Document {
+  key: string;
+  seq: number;
+}
+
+const CounterSchema = new Schema<ICounterDocument>({
+  key: { type: String, required: true, unique: true, index: true },
+  seq: { type: Number, required: true, default: 0 }
+});
+
+export const CounterModel = mongoose.models.Counter || mongoose.model<ICounterDocument>('Counter', CounterSchema);
+
+// ============================================================================
+// India Administrative Location Mongoose Schemas (Mongo parity scaffolding)
+// ============================================================================
+
+export interface IAdminStateDocument extends Document {
+  id: string;
+  code: string;
+  name: string;
+  type: 'state' | 'union_territory';
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdminStateSchema = new Schema<IAdminStateDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  code: { type: String, required: true, unique: true, index: true },
+  name: { type: String, required: true, index: true },
+  type: { type: String, enum: ['state', 'union_territory'], required: true },
+  isActive: { type: Boolean, default: true, index: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+export const AdminStateModel = mongoose.models.AdminState || mongoose.model<IAdminStateDocument>('AdminState', AdminStateSchema);
+
+export interface IAdminDistrictDocument extends Document {
+  id: string;
+  code: string;
+  name: string;
+  stateId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdminDistrictSchema = new Schema<IAdminDistrictDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  code: { type: String, required: true },
+  name: { type: String, required: true, index: true },
+  stateId: { type: String, required: true, index: true },
+  isActive: { type: Boolean, default: true, index: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+AdminDistrictSchema.index({ stateId: 1, isActive: 1 });
+
+export const AdminDistrictModel = mongoose.models.AdminDistrict || mongoose.model<IAdminDistrictDocument>('AdminDistrict', AdminDistrictSchema);
+
+export interface IAdminSubDistrictDocument extends Document {
+  id: string;
+  code: string;
+  name: string;
+  districtId: string;
+  stateId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdminSubDistrictSchema = new Schema<IAdminSubDistrictDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  code: { type: String, required: true },
+  name: { type: String, required: true, index: true },
+  districtId: { type: String, required: true, index: true },
+  stateId: { type: String, required: true, index: true },
+  isActive: { type: Boolean, default: true, index: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+AdminSubDistrictSchema.index({ districtId: 1, isActive: 1 });
+
+export const AdminSubDistrictModel = mongoose.models.AdminSubDistrict || mongoose.model<IAdminSubDistrictDocument>('AdminSubDistrict', AdminSubDistrictSchema);
+
+export interface IAdminBlockDocument extends Document {
+  id: string;
+  code: string;
+  name: string;
+  subDistrictId: string;
+  districtId: string;
+  stateId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdminBlockSchema = new Schema<IAdminBlockDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  code: { type: String, required: true },
+  name: { type: String, required: true, index: true },
+  subDistrictId: { type: String, required: true, index: true },
+  districtId: { type: String, required: true, index: true },
+  stateId: { type: String, required: true, index: true },
+  isActive: { type: Boolean, default: true, index: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+AdminBlockSchema.index({ subDistrictId: 1, isActive: 1 });
+
+export const AdminBlockModel = mongoose.models.AdminBlock || mongoose.model<IAdminBlockDocument>('AdminBlock', AdminBlockSchema);
+
+export interface IAdminLocalityDocument extends Document {
+  id: string;
+  code: string;
+  name: string;
+  blockId: string;
+  subDistrictId: string;
+  districtId: string;
+  stateId: string;
+  type: 'village' | 'town' | 'urban_locality' | 'city';
+  pinCode?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdminLocalitySchema = new Schema<IAdminLocalityDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  code: { type: String, required: true },
+  name: { type: String, required: true, index: true },
+  blockId: { type: String, required: true, index: true },
+  subDistrictId: { type: String, required: true, index: true },
+  districtId: { type: String, required: true, index: true },
+  stateId: { type: String, required: true, index: true },
+  type: { type: String, enum: ['village', 'town', 'urban_locality', 'city'], required: true },
+  pinCode: { type: String, index: true },
+  isActive: { type: Boolean, default: true, index: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+AdminLocalitySchema.index({ stateId: 1, districtId: 1, isActive: 1 });
+AdminLocalitySchema.index({ blockId: 1, isActive: 1 });
+AdminLocalitySchema.index({ pinCode: 1 });
+
+export const AdminLocalityModel = mongoose.models.AdminLocality || mongoose.model<IAdminLocalityDocument>('AdminLocality', AdminLocalitySchema);
+
+export interface IAdministrativeBoundaryDocument extends Document {
+  id: string;
+  level: 'state' | 'district' | 'sub_district' | 'block' | 'locality';
+  parentId: string | null;
+  geometry?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AdministrativeBoundarySchema = new Schema<IAdministrativeBoundaryDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  level: { type: String, enum: ['state', 'district', 'sub_district', 'block', 'locality'], required: true, index: true },
+  parentId: { type: String, index: true },
+  geometry: { type: Schema.Types.Mixed },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+// 2dsphere geospatial index on boundary geometry for location-in-polygon queries
+AdministrativeBoundarySchema.index({ geometry: '2dsphere' });
+
+export const AdministrativeBoundaryModel = mongoose.models.AdministrativeBoundary || mongoose.model<IAdministrativeBoundaryDocument>('AdministrativeBoundary', AdministrativeBoundarySchema);
+
+// ============================================================================
+// IP Security Log Mongoose Schema (Mongo parity scaffolding)
+// ============================================================================
+
+export interface IIPSecurityLogDocument extends Document {
+  id: string;
+  ipAddress: string;
+  timestamp: string;
+  userId?: string;
+  userEmail?: string;
+  userRole?: string;
+  correlationId?: string;
+  method: string;
+  endpoint: string;
+  userAgent?: string;
+  eventType: string;
+  success: boolean;
+  details?: string;
+  metadata?: Record<string, any>;
+  hash?: string;
+  prevHash?: string;
+}
+
+const IPSecurityLogSchema = new Schema<IIPSecurityLogDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  ipAddress: { type: String, required: true, index: true },
+  timestamp: { type: String, required: true, index: true },
+  userId: { type: String, index: true },
+  userEmail: { type: String },
+  userRole: { type: String },
+  correlationId: { type: String },
+  method: { type: String, required: true },
+  endpoint: { type: String, required: true, index: true },
+  userAgent: { type: String },
+  eventType: { type: String, required: true, index: true },
+  success: { type: Boolean, required: true, index: true },
+  details: { type: String },
+  metadata: { type: Schema.Types.Mixed },
+  hash: { type: String },
+  prevHash: { type: String }
+});
+
+IPSecurityLogSchema.index({ timestamp: -1 });
+IPSecurityLogSchema.index({ ipAddress: 1, timestamp: -1 });
+
+export const IPSecurityLogModel = mongoose.models.IPSecurityLog || mongoose.model<IIPSecurityLogDocument>('IPSecurityLog', IPSecurityLogSchema);

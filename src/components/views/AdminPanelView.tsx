@@ -13,7 +13,15 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  UserPlus,
+  Mail,
+  Lock,
+  Phone,
+  Building,
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export const AdminPanelView: React.FC = () => {
@@ -23,6 +31,19 @@ export const AdminPanelView: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Privileged member registration modal state
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regRole, setRegRole] = useState<UserRole>('officer');
+  const [regDepartmentId, setRegDepartmentId] = useState('');
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regLoading, setRegLoading] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
 
   // Audit filters
   const [auditModuleFilter, setAuditModuleFilter] = useState('ALL');
@@ -72,6 +93,36 @@ export const AdminPanelView: React.FC = () => {
       setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
     } catch (err: any) {
       alert(err.message || 'Failed to update account status.');
+    }
+  };
+
+  const handlePrivilegedRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError(null);
+    if (!regName.trim()) { setRegError('Full name is required.'); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(regEmail)) { setRegError('Please enter a valid email address.'); return; }
+    if (regPassword.length < 8) { setRegError('Password must be at least 8 characters in length.'); return; }
+    if (regPassword !== regConfirmPassword) { setRegError('Password and confirmation do not match.'); return; }
+    setRegLoading(true);
+    try {
+      const newUser = await api.registerPrivilegedMember({
+        name: regName.trim(),
+        email: regEmail.trim().toLowerCase(),
+        password: regPassword,
+        role: regRole,
+        phone: regPhone.trim() || undefined,
+        departmentId: regDepartmentId.trim() || undefined
+      });
+      setUsers(prev => [newUser, ...prev]);
+      // Reset modal
+      setRegName(''); setRegEmail(''); setRegPhone(''); setRegPassword(''); setRegConfirmPassword('');
+      setRegRole('officer'); setRegDepartmentId(''); setRegError(null);
+      setIsRegisterModalOpen(false);
+    } catch (err: any) {
+      setRegError(err.message || 'Failed to register privileged member.');
+    } finally {
+      setRegLoading(false);
     }
   };
 
@@ -169,7 +220,16 @@ export const AdminPanelView: React.FC = () => {
         <div className="bg-white rounded-lg border border-[#DCE3EA] overflow-hidden shadow-2xs">
           <div className="p-3 bg-[#F5F7FA] border-b border-[#DCE3EA] flex items-center justify-between text-xs text-[#657586]">
             <span>Active Civil Servants and Registered Community Observers</span>
-            <span className="font-mono text-[#153E63] font-semibold">{users.length} Records</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[#153E63] font-semibold">{users.length} Records</span>
+              <button
+                onClick={() => { setRegError(null); setIsRegisterModalOpen(true); }}
+                className="px-2.5 py-1 bg-[#153E63] hover:bg-[#1F5F91] text-white rounded-md text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Register Privileged Member</span>
+              </button>
+            </div>
           </div>
 
           <table className="w-full text-left text-xs border-collapse">

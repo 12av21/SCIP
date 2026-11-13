@@ -138,10 +138,19 @@
 
 ## 13. Current migration status
 
-- **Implemented:** design documentation, Mongoose schemas/connection scaffolding (non-integrated), isolated DB-path/test harness support.
-- **Not implemented:** runtime repository integration, migration tooling/execution, parity run, backup/restore drill, cutover.
-- **Declaration:** **MIGRATION READY: NO** (planning/readiness documented; execution blocked pending approvals and implementation).
+- **Implemented (Phase 2/3, isolated, no cutover):**
+  - Repository abstraction (`IScipRepository`, `JsonScipRepository`, `MongoScipRepository`), `src/database/index.ts` driver selection with explicit isolated gates (no split-brain).
+  - Full behavioral parity in `MongoScipRepository`: audit hash-chain append/verify (genesis-aware, canonical+legacy), user/admin mutations, notifications, feedback, report/incident/inspection workflows, AI analysis execution/storage, metrics, counter-backed async ID generation.
+  - Mongo transactions (`withTransaction`) for multi-document workflows (`createReport`, `createIncidentFromCluster`, `reviewIncident`, `resolveIncident`, `assignIncidentOfficer`, `createInspection`, `verifyInspection`, `withdrawReport`, `escalateIncident`).
+  - `CounterModel` for concurrency-safe IDs; schema/index scaffolds; isolated migration tooling (`scripts/mongo-migration-tool.mts`, `scripts/mongo-migration-execute.mts`) executed against `scip_dev` (dry-run + execute + idempotent re-run verified).
+  - Isolated parity evidence: `npm run test:security:http` with `SCIP_TEST_DRIVER=mongo` — **303/303 PASS** on ephemeral `scip_test_http_*` DB (gated runtime, DB dropped after). `npm run test:security` 46/46, `npm run test:security:http` 315/315 (JSON).
+- **Not implemented / not verified:**
+  - Runtime cutover (JSON remains active default/fallback; Mongo runtime requires explicit opt-in + non-prod + local isolated `scip_dev|scip_test*` URI + connected target).
+  - Backup/restore drill, rollback rehearsal, and production/operational readiness evidence.
+  - Exhaustive RBAC×endpoint×state matrix, distributed rate limiting, deployed CSP/CORS/TLS/logging validation, AI certification.
+
+- **Declaration:** **MIGRATION READY: NO** (planning + isolated parity evidence documented; runtime cutover blocked pending explicit approvals and operational evidence).
 
 ## 14. Safety statement
 
-No migration was executed. No MongoDB/Atlas/production database was connected. **`.scip_database.json` and existing application data were not modified, reset, migrated, or overwritten.**
+No migration was executed. No MongoDB/Atlas/production database was connected. **`.scip_database.json` and existing application data were not modified, reset, migrated, or overwritten.** All automated and manual checks used temporary databases, ephemeral localhost servers, and test secrets only.

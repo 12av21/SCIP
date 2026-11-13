@@ -21,7 +21,8 @@ import {
   ClipboardCheck,
   ShieldAlert,
   BarChart3,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Globe
 } from 'lucide-react';
 
 interface GovernmentNavigationProps {
@@ -63,6 +64,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
           { id: 'field-officer-dashboard', label: t('nav.field_operations', 'Field Operations'), icon: ClipboardCheck },
           { id: 'incidents', label: t('nav.work_orders', 'Incident Work Orders'), icon: AlertTriangle },
+          { id: 'map', label: t('nav.geospatial_map', 'Complaint Map'), icon: MapPin },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }
@@ -74,6 +76,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
           { id: 'dept-officer-dashboard', label: t('nav.dept_desk', 'Department Desk'), icon: Building2 },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
+          { id: 'map', label: t('nav.geospatial_map', 'Complaint Map'), icon: MapPin },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'trends', label: t('nav.sla_trends', 'SLA Trends'), icon: TrendingUp },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
@@ -85,6 +88,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
         return [
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
           { id: 'analyst-dashboard', label: t('nav.analytics_models', 'Analytics & Models'), icon: BarChart3 },
+          { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
           { id: 'trends', label: t('nav.trends_recurrence', 'Trends & Recurrence'), icon: TrendingUp },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
           { id: 'agent', label: t('nav.scip_agent', 'SCIP Agent'), icon: Cpu },
@@ -98,6 +102,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
           { id: 'intel-dashboard', label: t('nav.command_center', 'Command Dashboard'), icon: Radio },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
+          { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
           { id: 'trends', label: t('nav.trends_recurrence', 'Trend Analytics'), icon: TrendingUp },
           { id: 'agent', label: t('nav.scip_agent', 'Decision Agent'), icon: Cpu },
@@ -114,6 +119,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'intel-dashboard', label: t('nav.command_center', 'Command Center'), icon: Radio },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
           { id: 'analyst-dashboard', label: t('nav.analytics_models', 'Model Metrics'), icon: BarChart3 },
+          { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
           { id: 'tests', label: t('nav.system_audit', 'System Audit'), icon: CheckCircle2 },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },

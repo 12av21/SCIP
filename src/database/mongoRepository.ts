@@ -1,16 +1,18 @@
 ﻿/**
  * MongoDB repository (Phase 2 - incremental parity; NOT runtime-enabled/cut over by default)
  *
- * Implements selected operations with behavioral parity to JSON SCIPDatabase where feasible
- * (audit hash-chain append/verify, notifications, feedback, core user/admin mutations).
- * Complex report/incident workflows, AI analysis execution/storage, inspections verification
- * workflows, assignments/escalations side-effects, seeding/reset, and metrics still fail loud
- * until parity is verified. Runtime remains JSON by default/fallback; no split-brain/cutover.
+ * Implements behavioral parity to JSON SCIPDatabase for audit hash-chain append/verify,
+ * user/admin mutations, notifications, feedback, report/incident/inspection workflows,
+ * AI analysis execution/storage, and metrics. Seed/reset remain intentionally fail-loud.
+ * Runtime remains JSON by default/fallback; Mongo runtime is enabled only with explicit
+ * isolated gates (DATABASE_DRIVER=mongo + SCIP_MONGO_RUNTIME_INTEGRATED=true + non-production
+ * + local isolated scip_dev|scip_test* URI + connected target). No split-brain/cutover.
  */
 import crypto from 'crypto';
-import { UserModel, ReportModel, IncidentModel, DepartmentModel, NotificationModel, FeedbackModel, AuditLogModel, InspectionModel, AIAnalysisModel, ResolutionModel, AssignmentModel } from './models/index.js';
+import mongoose from 'mongoose';
+import { UserModel, ReportModel, IncidentModel, DepartmentModel, NotificationModel, FeedbackModel, AuditLogModel, InspectionModel, AIAnalysisModel, ResolutionModel, AssignmentModel, CounterModel, AdminStateModel, AdminDistrictModel, AdminSubDistrictModel, AdminBlockModel, AdminLocalityModel, AdministrativeBoundaryModel, IPSecurityLogModel } from './models/index.js';
 import type { IScipRepository } from './repository.js';
-import type { User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster, Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics, Resolution, Assignment, ReportCategory } from '../types/scip.js';
+import type { User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster, Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics, Resolution, Assignment, ReportCategory, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel } from '../types/scip.js';
 import { classifyReport, extractEntities, determineSeverity } from '../ai/classifier.js';
 import { globalVectorizer } from '../ai/tfidf.js';
 import { findSimilarAndDuplicateReports } from '../ai/duplicateDetector.js';
@@ -28,6 +30,15 @@ export class MongoScipRepositoryNotIntegratedError extends Error {
 
 function notParity(method: string): never {
   throw new MongoScipRepositoryNotIntegratedError(method);
+}
+
+async function withTransaction<T>(fn: (session: mongoose.ClientSession) => Promise<T>): Promise<T> {
+  const session = await mongoose.startSession();
+  try {
+    return await session.withTransaction((s) => fn(s));
+  } finally {
+    await session.endSession();
+  }
 }
 
 function stripMongo<T>(doc: any): T | undefined {
@@ -49,32 +60,92 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function auditId(): string {
-  return `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+async function nextCounterSeq(key: string, seedMax = 0): Promise<number> {
+  // Atomic increment; seed from provided max on first use to avoid colliding with existing records.
+  const existing = await CounterModel.findOne({ key }).lean();
+  if (!existing) {
+    try {
+      await CounterModel.create({ key, seq: seedMax });
+    } catch {
+      // concurrent seed; ignore
+    }
+  } else if ((existing as any).seq < seedMax) {
+    await CounterModel.updateOne({ key, seq: { $lt: seedMax } }, { $set: { seq: seedMax } });
+  }
+  const updated = await CounterModel.findOneAndUpdate(
+    { key },
+    { $inc: { seq: 1 } },
+    { returnDocument: 'after', upsert: true }
+  ).lean();
+  return Number((updated as any)?.seq || seedMax + 1);
 }
 
-function notifId(): string {
-  return `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+async function maxNumericIdSuffix(model: any, prefixRegex: RegExp): Promise<number> {
+  const docs = await model.find({ id: prefixRegex }, { id: 1 }).lean();
+  let max = 0;
+  for (const d of docs as any[]) {
+    const m = String(d.id || '').match(/(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10) || 0);
+  }
+  return max;
 }
 
-function userId(): string {
-  return `USR-${Date.now().toString().slice(-6)}`;
+async function auditId(): Promise<string> {
+  const ms = Date.now();
+  const seq = await nextCounterSeq(`AUD:${ms}`, 0);
+  return `AUD-${ms}-${String(seq % 10000).padStart(4, '0')}`;
 }
 
-function feedbackId(): string {
-  return `FB-${Date.now().toString().slice(-6)}`;
+async function notifId(): Promise<string> {
+  const ms = Date.now();
+  const seq = await nextCounterSeq(`NOTIF:${ms}`, 0);
+  return `NOTIF-${ms}-${String(seq % 10000).padStart(4, '0')}`;
 }
 
-function resolutionId(): string {
-  return `RES-${Date.now().toString().slice(-6)}`;
+async function userId(): Promise<string> {
+  const seed = await maxNumericIdSuffix(UserModel, /^USR-/);
+  const seq = await nextCounterSeq('USR', seed);
+  return `USR-${String(seq).padStart(6, '0')}`;
 }
 
-function inspectionId(): string {
-  return `INSP-${Date.now().toString().slice(-6)}`;
+async function feedbackId(): Promise<string> {
+  const seed = await maxNumericIdSuffix(FeedbackModel, /^FB-/);
+  const seq = await nextCounterSeq('FB', seed);
+  return `FB-${String(seq).padStart(6, '0')}`;
 }
 
-function assignmentId(): string {
-  return `ASG-${Date.now().toString().slice(-6)}`;
+async function resolutionId(): Promise<string> {
+  const seed = await maxNumericIdSuffix(ResolutionModel, /^RES-/);
+  const seq = await nextCounterSeq('RES', seed);
+  return `RES-${String(seq).padStart(6, '0')}`;
+}
+
+async function inspectionId(): Promise<string> {
+  const seed = await maxNumericIdSuffix(InspectionModel, /^INSP-/);
+  const seq = await nextCounterSeq('INSP', seed);
+  return `INSP-${String(seq).padStart(6, '0')}`;
+}
+
+async function assignmentId(): Promise<string> {
+  const seed = await maxNumericIdSuffix(AssignmentModel, /^ASG-/);
+  const seq = await nextCounterSeq('ASG', seed);
+  return `ASG-${String(seq).padStart(6, '0')}`;
+}
+
+async function nextReportId(): Promise<string> {
+  const year = new Date().getFullYear();
+  const key = `REP-${year}`;
+  const seed = await maxNumericIdSuffix(ReportModel, new RegExp(`^REP-${year}-`));
+  const seq = await nextCounterSeq(key, seed);
+  return `REP-${year}-${String(seq).padStart(3, '0')}`;
+}
+
+async function nextIncidentId(): Promise<string> {
+  const year = new Date().getFullYear();
+  const key = `INC-${year}`;
+  const seed = await maxNumericIdSuffix(IncidentModel, new RegExp(`^INC-${year}-`));
+  const seq = await nextCounterSeq(key, seed);
+  return `INC-${year}-${String(seq).padStart(3, '0')}`;
 }
 
 export class MongoScipRepository implements IScipRepository {
@@ -85,15 +156,16 @@ export class MongoScipRepository implements IScipRepository {
   resetToSeedData(): void { notParity('resetToSeedData'); }
   isDiskPersisted(): boolean { return false; }
 
-  async logAudit(log: Omit<AuditLog, 'id' | 'timestamp' | 'hash' | 'prevHash'>): Promise<AuditLog> {
+  async logAudit(log: Omit<AuditLog, 'id' | 'timestamp' | 'hash' | 'prevHash'>, session?: mongoose.ClientSession): Promise<AuditLog> {
     const prev = await AuditLogModel.findOne().sort({ timestamp: -1, id: -1 }).lean();
     const prevHash = (prev as any)?.hash || AUDIT_GENESIS;
-    const id = auditId();
+    const id = await auditId();
     const timestamp = nowIso();
     const hashData = JSON.stringify([prevHash, id, timestamp, log.action, log.module, log.userId, log.details ?? '']);
     const hash = crypto.createHash('sha256').update(hashData).digest('hex');
     const full: AuditLog = { ...log, id, timestamp, hash, prevHash } as AuditLog;
-    await AuditLogModel.create(full);
+    const doc = new AuditLogModel(full);
+    await doc.save(session ? { session } : {});
     return full;
   }
 
@@ -167,7 +239,7 @@ export class MongoScipRepository implements IScipRepository {
     const email = String((userData as any).email || '').toLowerCase();
     const existing = await UserModel.findOne({ email }).lean();
     if (existing) throw new Error(`Email ${email} is already registered.`);
-    const id = userId();
+    const id = await userId();
     const now = nowIso();
     const newUser: any = {
       ...userData,
@@ -199,7 +271,7 @@ export class MongoScipRepository implements IScipRepository {
     const updated = await UserModel.findOneAndUpdate(
       { id: userId },
       { $set: { role: newRole, sessionVersion: (user.sessionVersion ?? 0) + 1, updatedAt: nowIso() } },
-      { new: true, lean: true }
+      { returnDocument: 'after', lean: true }
     );
     await this.logAudit({
       action: 'ROLE_CHANGED', module: 'admin', recordId: userId,
@@ -214,7 +286,7 @@ export class MongoScipRepository implements IScipRepository {
     if (!user) throw new Error('User not found');
     const patch: any = { status, updatedAt: nowIso() };
     if (status === 'suspended') patch.sessionVersion = (user.sessionVersion ?? 0) + 1;
-    const updated = await UserModel.findOneAndUpdate({ id: userId }, { $set: patch }, { new: true, lean: true });
+    const updated = await UserModel.findOneAndUpdate({ id: userId }, { $set: patch }, { returnDocument: 'after', lean: true });
     await this.logAudit({
       action: 'USER_STATUS_UPDATED', module: 'admin', recordId: userId,
       userId: adminUser.id, userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
@@ -252,7 +324,7 @@ export class MongoScipRepository implements IScipRepository {
     const patch: any = { updatedAt: nowIso() };
     if (updates.name) patch.name = String(updates.name).trim();
     if (updates.phone !== undefined) patch.phone = String(updates.phone).trim();
-    const updated = await UserModel.findOneAndUpdate({ id: userId }, { $set: patch }, { new: true, lean: true });
+    const updated = await UserModel.findOneAndUpdate({ id: userId }, { $set: patch }, { returnDocument: 'after', lean: true });
     return stripPassword(updated)!;
   }
 
@@ -284,34 +356,35 @@ export class MongoScipRepository implements IScipRepository {
     return stripMongo<AIAnalysis>(doc);
   }
   async createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<{ report: Report; analysis: AIAnalysis }> {
-    const count = await ReportModel.countDocuments();
-    const id = `REP-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
-    const now = nowIso();
-    const report: any = { ...reportInput, id, status: 'analyzed', createdAt: now, updatedAt: now };
+    return withTransaction(async (session) => {
+      const id = await nextReportId();
+      const now = nowIso();
+      const report: any = { ...reportInput, id, status: 'analyzed', createdAt: now, updatedAt: now };
 
-    await ReportModel.create(report);
+      await ReportModel.create(report, { session });
 
-    const allReports = (await ReportModel.find().lean()).map(d => stripMongo<Report>(d)!).filter(Boolean) as Report[];
-    const docs = allReports.map(r => ({ id: r.id, text: `${r.title} ${r.description} ${r.category} ${r.locationName}` }));
-    globalVectorizer.fit(docs);
+      const allReports = (await ReportModel.find().lean()).map(d => stripMongo<Report>(d)!).filter(Boolean) as Report[];
+      const docs = allReports.map(r => ({ id: r.id, text: `${r.title} ${r.description} ${r.category} ${r.locationName}` }));
+      globalVectorizer.fit(docs);
 
-    const analysis = await this.runAndStoreAIAnalysis(report as Report, true);
+      const analysis = await this.runAndStoreAIAnalysis(report as Report, true);
 
-    await this.logAudit({
-      action: 'REPORT_CREATED', module: 'reports', recordId: id,
-      userId: report.citizenId, userEmail: report.citizenEmail, userRole: 'citizen' as any, ipAddress: '127.0.0.1',
-      details: `Report submitted: "${report.title}" at ${report.locationName}`
-    } as any);
+      await this.logAudit({
+        action: 'REPORT_CREATED', module: 'reports', recordId: id,
+        userId: report.citizenId, userEmail: report.citizenEmail, userRole: 'citizen' as any, ipAddress: '127.0.0.1',
+        details: `Report submitted: "${report.title}" at ${report.locationName}`
+      } as any, session);
 
-    await this.createNotification({
-      userId: report.citizenId,
-      title: 'Report Received & Analyzed',
-      message: `Your report ${id} was logged. AI identified category as "${analysis.categoryPredicted}" (${(analysis.categoryConfidence * 100).toFixed(0)}% confidence).`,
-      type: 'report_status' as any,
-      link: id
+      await this.createNotification({
+        userId: report.citizenId,
+        title: 'Report Received & Analyzed',
+        message: `Your report ${id} was logged. AI identified category as "${analysis.categoryPredicted}" (${(analysis.categoryConfidence * 100).toFixed(0)}% confidence).`,
+        type: 'report_status' as any,
+        link: id
+      }, session);
+
+      return { report: stripMongo<Report>(report) as Report, analysis };
     });
-
-    return { report: stripMongo<Report>(report) as Report, analysis };
   }
 
   async runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): Promise<AIAnalysis> {
@@ -394,7 +467,7 @@ export class MongoScipRepository implements IScipRepository {
       }
     }
     safeUpdates.updatedAt = nowIso();
-    const updated = await ReportModel.findOneAndUpdate({ id }, { $set: safeUpdates }, { new: true, lean: true });
+    const updated = await ReportModel.findOneAndUpdate({ id }, { $set: safeUpdates }, { returnDocument: 'after', lean: true });
     await this.logAudit({
       action: 'REPORT_UPDATED', module: 'reports', recordId: id,
       userId: user.id, userEmail: user.email, userRole: user.role, ipAddress: '127.0.0.1',
@@ -404,27 +477,29 @@ export class MongoScipRepository implements IScipRepository {
   }
 
   async withdrawReport(id: string, user: User): Promise<Report> {
-    const report: any = await ReportModel.findOne({ id }).lean();
-    if (!report) throw new Error('Report not found');
-    if (user.role === 'citizen' && report.citizenId !== user.id) throw new Error('Unauthorized to withdraw this report');
-    if (report.status === 'closed' || report.status === 'resolved') throw new Error('Report is already closed.');
-    if (user.role === 'citizen' && report.status !== 'submitted' && report.status !== 'analyzed') {
-      throw new Error('Report cannot be withdrawn after it has been linked or escalated.');
-    }
-    const updated = await ReportModel.findOneAndUpdate({ id }, { $set: { status: 'closed', updatedAt: nowIso() } }, { new: true, lean: true });
-    await this.logAudit({
-      action: 'REPORT_WITHDRAWN', module: 'reports', recordId: id,
-      userId: user.id, userEmail: user.email, userRole: user.role, ipAddress: '127.0.0.1',
-      details: `Report ${id} withdrawn and closed by ${user.name}`
-    } as any);
-    await this.createNotification({
-      userId: report.citizenId,
-      title: 'Report Withdrawn',
-      message: `Your report ${id} has been marked as withdrawn/closed.`,
-      type: 'report_status' as any,
-      link: id
+    return withTransaction(async (session) => {
+      const report: any = await ReportModel.findOne({ id }).lean();
+      if (!report) throw new Error('Report not found');
+      if (user.role === 'citizen' && report.citizenId !== user.id) throw new Error('Unauthorized to withdraw this report');
+      if (report.status === 'closed' || report.status === 'resolved') throw new Error('Report is already closed.');
+      if (user.role === 'citizen' && report.status !== 'submitted' && report.status !== 'analyzed') {
+        throw new Error('Report cannot be withdrawn after it has been linked or escalated.');
+      }
+      const updated = await ReportModel.findOneAndUpdate({ id }, { $set: { status: 'closed', updatedAt: nowIso() } }, { returnDocument: 'after', lean: true, session });
+      await this.logAudit({
+        action: 'REPORT_WITHDRAWN', module: 'reports', recordId: id,
+        userId: user.id, userEmail: user.email, userRole: user.role, ipAddress: '127.0.0.1',
+        details: `Report ${id} withdrawn and closed by ${user.name}`
+      } as any, session);
+      await this.createNotification({
+        userId: report.citizenId,
+        title: 'Report Withdrawn',
+        message: `Your report ${id} has been marked as withdrawn/closed.`,
+        type: 'report_status' as any,
+        link: id
+      }, session);
+      return stripMongo<Report>(updated)!;
     });
-    return stripMongo<Report>(updated)!;
   }
 
   async getIncidents(filter?: { status?: string; category?: string; priority?: string }): Promise<Incident[]> {
@@ -440,123 +515,126 @@ export class MongoScipRepository implements IScipRepository {
     return stripMongo<Incident>(doc);
   }
   async createIncidentFromCluster(cluster: SpatioTemporalCluster, creatorUser: User): Promise<Incident> {
-    if (!cluster || !Array.isArray((cluster as any).reportIds) || (cluster as any).reportIds.length === 0) {
-      throw new Error('Valid cluster with report IDs is required.');
-    }
-    const uniqueIds = Array.from(new Set((cluster as any).reportIds.map((id: string) => String(id).trim()).filter(Boolean)));
-    if (uniqueIds.length === 0) throw new Error('Cluster must include valid report IDs.');
-
-    const reports: any[] = [];
-    for (const rId of uniqueIds) {
-      const rep: any = await ReportModel.findOne({ id: rId }).lean();
-      if (!rep) throw new Error(`Report ${rId} not found.`);
-      if (rep.status === 'closed' || rep.status === 'resolved') throw new Error(`Report ${rId} cannot be linked from a closed state.`);
-      if (rep.incidentId) {
-        const existing: any = await IncidentModel.findOne({ id: rep.incidentId }).lean();
-        if (existing && existing.status !== 'dismissed' && existing.status !== 'closed') {
-          throw new Error(`Report ${rId} is already linked to an active incident.`);
-        }
+    return withTransaction(async (session) => {
+      if (!cluster || !Array.isArray((cluster as any).reportIds) || (cluster as any).reportIds.length === 0) {
+        throw new Error('Valid cluster with report IDs is required.');
       }
-      reports.push(rep);
-    }
+      const uniqueIds = Array.from(new Set((cluster as any).reportIds.map((id: string) => String(id).trim()).filter(Boolean)));
+      if (uniqueIds.length === 0) throw new Error('Cluster must include valid report IDs.');
 
-    const count = await IncidentModel.countDocuments();
-    const id = `INC-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
-    const now = nowIso();
-    const category = ((cluster as any).category || reports[0]?.category || 'Water & Drainage') as any;
-    const lat = Number((cluster as any).centroid?.latitude);
-    const lng = Number((cluster as any).centroid?.longitude);
+      const reports: any[] = [];
+      for (const rId of uniqueIds) {
+        const rep: any = await ReportModel.findOne({ id: rId }).lean();
+        if (!rep) throw new Error(`Report ${rId} not found.`);
+        if (rep.status === 'closed' || rep.status === 'resolved') throw new Error(`Report ${rId} cannot be linked from a closed state.`);
+        if (rep.incidentId) {
+          const existing: any = await IncidentModel.findOne({ id: rep.incidentId }).lean();
+          if (existing && existing.status !== 'dismissed' && existing.status !== 'closed') {
+            throw new Error(`Report ${rId} is already linked to an active incident.`);
+          }
+        }
+        reports.push(rep);
+      }
 
-    const incident: any = {
-      id,
-      title: typeof (cluster as any).suggestedTitle === 'string' && (cluster as any).suggestedTitle.trim() ? (cluster as any).suggestedTitle.trim().slice(0, 200) : `Clustered incident (${uniqueIds.length} reports)`,
-      category,
-      description: `Synthesized potential incident derived from ${uniqueIds.length} correlated community reports within ${Number((cluster as any).radiusMeters) || 0}m radius.`,
-      locationName: `Cluster Centroid (${Number.isFinite(lat) ? lat : 0}, ${Number.isFinite(lng) ? lng : 0})`,
-      latitude: Number.isFinite(lat) ? lat : 0,
-      longitude: Number.isFinite(lng) ? lng : 0,
-      radiusMeters: Number.isFinite(Number((cluster as any).radiusMeters)) ? Math.max(0, Number((cluster as any).radiusMeters)) : 0,
-      reportIds: uniqueIds,
-      severity: (cluster as any).severity || 'medium',
-      priority: (cluster as any).priority || 'P3_MEDIUM',
-      confidence: Number.isFinite(Number((cluster as any).confidence)) ? Math.max(0, Math.min(1, Number((cluster as any).confidence))) : 0.5,
-      status: 'potential',
-      isAIGenerated: true,
-      humanReviewed: false,
-      evidence: Array.isArray((cluster as any).evidence) ? (cluster as any).evidence.filter((e: any) => typeof e === 'string').slice(0, 20) : [],
-      createdAt: now,
-      updatedAt: now
-    };
+      const id = await nextIncidentId();
+      const now = nowIso();
+      const category = ((cluster as any).category || reports[0]?.category || 'Water & Drainage') as any;
+      const lat = Number((cluster as any).centroid?.latitude);
+      const lng = Number((cluster as any).centroid?.longitude);
 
-    await IncidentModel.create(incident);
-    for (const rep of reports) {
-      await ReportModel.updateOne({ id: rep.id }, { $set: { status: 'linked', incidentId: id } });
-    }
-    await this.logAudit({
-      action: 'INCIDENT_DETECTED', module: 'incidents', recordId: id,
-      userId: creatorUser.id, userEmail: creatorUser.email, userRole: creatorUser.role, ipAddress: '127.0.0.1',
-      details: `Formed potential incident ${id} from cluster with ${uniqueIds.length} reports`
-    } as any);
-    return stripMongo<Incident>(incident)!;
+      const incident: any = {
+        id,
+        title: typeof (cluster as any).suggestedTitle === 'string' && (cluster as any).suggestedTitle.trim() ? (cluster as any).suggestedTitle.trim().slice(0, 200) : `Clustered incident (${uniqueIds.length} reports)`,
+        category,
+        description: `Synthesized potential incident derived from ${uniqueIds.length} correlated community reports within ${Number((cluster as any).radiusMeters) || 0}m radius.`,
+        locationName: `Cluster Centroid (${Number.isFinite(lat) ? lat : 0}, ${Number.isFinite(lng) ? lng : 0})`,
+        latitude: Number.isFinite(lat) ? lat : 0,
+        longitude: Number.isFinite(lng) ? lng : 0,
+        radiusMeters: Number.isFinite(Number((cluster as any).radiusMeters)) ? Math.max(0, Number((cluster as any).radiusMeters)) : 0,
+        reportIds: uniqueIds,
+        severity: (cluster as any).severity || 'medium',
+        priority: (cluster as any).priority || 'P3_MEDIUM',
+        confidence: Number.isFinite(Number((cluster as any).confidence)) ? Math.max(0, Math.min(1, Number((cluster as any).confidence))) : 0.5,
+        status: 'potential',
+        isAIGenerated: true,
+        humanReviewed: false,
+        evidence: Array.isArray((cluster as any).evidence) ? (cluster as any).evidence.filter((e: any) => typeof e === 'string').slice(0, 20) : [],
+        createdAt: now,
+        updatedAt: now
+      };
+
+      await IncidentModel.create(incident, { session });
+      for (const rep of reports) {
+        await ReportModel.updateOne({ id: rep.id }, { $set: { status: 'linked', incidentId: id } }, { session });
+      }
+      await this.logAudit({
+        action: 'INCIDENT_DETECTED', module: 'incidents', recordId: id,
+        userId: creatorUser.id, userEmail: creatorUser.email, userRole: creatorUser.role, ipAddress: '127.0.0.1',
+        details: `Formed potential incident ${id} from cluster with ${uniqueIds.length} reports`
+      } as any, session);
+      return stripMongo<Incident>(incident)!;
+    });
   }
   async reviewIncident(incidentId: string, action: 'confirm' | 'dismiss', reviewer: User, notes?: string, departmentId?: string, officerId?: string): Promise<Incident> {
-    const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
-    if (!incident) throw new Error('Incident not found');
-    if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot review a closed incident.');
-    if (reviewer.role === 'dept_officer' && reviewer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reviewer.departmentId) {
-      throw new Error('Department boundary violation.');
-    }
-    const now = nowIso();
-    const noteText = notes || '';
-    const patch: any = { humanReviewed: true, reviewedBy: `${reviewer.name} (${reviewer.role})`, reviewedAt: now, reviewNotes: noteText, updatedAt: now };
-
-    if (action === 'confirm') {
-      patch.status = 'confirmed';
-      if (departmentId) {
-        if (reviewer.role === 'dept_officer' && reviewer.departmentId && reviewer.departmentId !== departmentId) throw new Error('Department boundary violation.');
-        const dept: any = await DepartmentModel.findOne({ id: departmentId }).lean();
-        if (!dept) throw new Error('Target department not found.');
-        patch.assignedDepartmentId = departmentId;
-        patch.assignedDepartmentName = dept.name;
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error('Incident not found');
+      if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot review a closed incident.');
+      if (reviewer.role === 'dept_officer' && reviewer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reviewer.departmentId) {
+        throw new Error('Department boundary violation.');
       }
-      if (officerId) {
-        const off: any = await UserModel.findOne({ id: officerId }).lean();
-        if (!off) throw new Error('Assigned officer not found.');
-        if (off.role !== 'officer' || off.status !== 'active') throw new Error('Assigned officer must be an active field officer.');
-        const targetDept = departmentId || patch.assignedDepartmentId || incident.assignedDepartmentId;
-        if (targetDept && off.departmentId !== targetDept) throw new Error('Assigned officer must belong to the target department.');
-        if (targetDept) {
-          const dept: any = await DepartmentModel.findOne({ id: targetDept }).lean();
-          patch.assignedDepartmentId = targetDept;
-          if (dept) patch.assignedDepartmentName = dept.name;
+      const now = nowIso();
+      const noteText = notes || '';
+      const patch: any = { humanReviewed: true, reviewedBy: `${reviewer.name} (${reviewer.role})`, reviewedAt: now, reviewNotes: noteText, updatedAt: now };
+
+      if (action === 'confirm') {
+        patch.status = 'confirmed';
+        if (departmentId) {
+          if (reviewer.role === 'dept_officer' && reviewer.departmentId && reviewer.departmentId !== departmentId) throw new Error('Department boundary violation.');
+          const dept: any = await DepartmentModel.findOne({ id: departmentId }).lean();
+          if (!dept) throw new Error('Target department not found.');
+          patch.assignedDepartmentId = departmentId;
+          patch.assignedDepartmentName = dept.name;
         }
-        patch.assignedOfficerId = officerId;
-        patch.assignedOfficerName = off.name;
+        if (officerId) {
+          const off: any = await UserModel.findOne({ id: officerId }).lean();
+          if (!off) throw new Error('Assigned officer not found.');
+          if (off.role !== 'officer' || off.status !== 'active') throw new Error('Assigned officer must be an active field officer.');
+          const targetDept = departmentId || patch.assignedDepartmentId || incident.assignedDepartmentId;
+          if (targetDept && off.departmentId !== targetDept) throw new Error('Assigned officer must belong to the target department.');
+          if (targetDept) {
+            const dept: any = await DepartmentModel.findOne({ id: targetDept }).lean();
+            patch.assignedDepartmentId = targetDept;
+            if (dept) patch.assignedDepartmentName = dept.name;
+          }
+          patch.assignedOfficerId = officerId;
+          patch.assignedOfficerName = off.name;
+        }
+        await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
+        for (const rId of (incident.reportIds || [])) {
+          await ReportModel.updateOne({ id: rId }, { $set: { status: 'under_review' } }, { session });
+        }
+        await this.logAudit({
+          action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incidentId,
+          userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
+          details: `Confirmed incident ${incidentId}. Notes: ${noteText}`
+        } as any, session);
+      } else {
+        patch.status = 'dismissed';
+        await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
+        for (const rId of (incident.reportIds || [])) {
+          await ReportModel.updateOne({ id: rId }, { $set: { status: 'analyzed' }, $unset: { incidentId: '' } }, { session });
+        }
+        await this.logAudit({
+          action: 'INCIDENT_DISMISSED', module: 'incidents', recordId: incidentId,
+          userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
+          details: `Dismissed potential incident ${incidentId}. Reason: ${noteText}`
+        } as any, session);
       }
-      await IncidentModel.updateOne({ id: incidentId }, { $set: patch });
-      for (const rId of (incident.reportIds || [])) {
-        await ReportModel.updateOne({ id: rId }, { $set: { status: 'under_review' } });
-      }
-      await this.logAudit({
-        action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incidentId,
-        userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
-        details: `Confirmed incident ${incidentId}. Notes: ${noteText}`
-      } as any);
-    } else {
-      patch.status = 'dismissed';
-      await IncidentModel.updateOne({ id: incidentId }, { $set: patch });
-      for (const rId of (incident.reportIds || [])) {
-        await ReportModel.updateOne({ id: rId }, { $set: { status: 'analyzed' }, $unset: { incidentId: '' } });
-      }
-      await this.logAudit({
-        action: 'INCIDENT_DISMISSED', module: 'incidents', recordId: incidentId,
-        userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
-        details: `Dismissed potential incident ${incidentId}. Reason: ${noteText}`
-      } as any);
-    }
 
-    const updated = await IncidentModel.findOne({ id: incidentId }).lean();
-    return stripMongo<Incident>(updated)!;
+      const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
+    });
   }
   async resolveIncident(incidentId: string, resolver: User, payload: { actionTaken: string; preventiveMeasures?: string; costEstimate?: number }): Promise<Incident> {
     const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
@@ -568,12 +646,12 @@ export class MongoScipRepository implements IScipRepository {
     const now = nowIso();
     await IncidentModel.updateOne({ id: incidentId }, { $set: { status: 'resolved', resolutionNotes: payload.actionTaken, resolvedAt: now, updatedAt: now } });
     const res: Resolution = {
-      id: resolutionId(), incidentId, resolvedBy: resolver.name, actionTaken: payload.actionTaken,
+      id: await resolutionId(), incidentId, resolvedBy: resolver.name, actionTaken: payload.actionTaken,
       preventiveMeasures: payload.preventiveMeasures, costEstimate: payload.costEstimate, citizenVerified: false, resolvedAt: now
     } as any;
     await ResolutionModel.create(res);
     for (const rId of (incident.reportIds || [])) {
-      const r: any = await ReportModel.findOneAndUpdate({ id: rId }, { $set: { status: 'resolved' } }, { new: true, lean: true });
+      const r: any = await ReportModel.findOneAndUpdate({ id: rId }, { $set: { status: 'resolved' } }, { returnDocument: 'after', lean: true });
       if (r?.citizenId) {
         await this.createNotification({
           userId: r.citizenId, title: 'Incident Resolved',
@@ -595,9 +673,10 @@ export class MongoScipRepository implements IScipRepository {
     const docs = await NotificationModel.find({ userId }).sort({ createdAt: -1, id: -1 }).lean();
     return docs.map(d => stripMongo<Notification>(d)!).filter(Boolean) as Notification[];
   }
-  async createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>): Promise<Notification> {
-    const notif: Notification = { ...data, id: notifId(), read: false, createdAt: nowIso() } as Notification;
-    await NotificationModel.create(notif);
+  async createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>, session?: mongoose.ClientSession): Promise<Notification> {
+    const notif: Notification = { ...data, id: await notifId(), read: false, createdAt: nowIso() } as Notification;
+    const doc = new NotificationModel(notif);
+    await doc.save(session ? { session } : {});
     return notif;
   }
   async markNotificationAsRead(notifId: string, userId: string): Promise<void> {
@@ -607,7 +686,7 @@ export class MongoScipRepository implements IScipRepository {
     await NotificationModel.updateMany({ userId }, { $set: { read: true } });
   }
   async submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> {
-    const fb: Feedback = { ...data, id: feedbackId(), createdAt: nowIso() } as Feedback;
+    const fb: Feedback = { ...data, id: await feedbackId(), createdAt: nowIso() } as Feedback;
     await FeedbackModel.create(fb);
     return fb;
   }
@@ -631,167 +710,175 @@ export class MongoScipRepository implements IScipRepository {
     return (stripMongo<InspectionRecord>(doc) as InspectionRecord | undefined) || null;
   }
   async createInspection(data: any, officer: User): Promise<InspectionRecord> {
-    const incident: any = await IncidentModel.findOne({ id: data.incidentId }).lean();
-    if (!incident) throw new Error(`Incident ${data.incidentId} not found.`);
-    if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') {
-      throw new Error('Cannot create inspection for a closed incident.');
-    }
-    if (officer.role === 'officer' && incident.assignedOfficerId && incident.assignedOfficerId !== officer.id) {
-      throw new Error('Field officers may only inspect incidents assigned to them.');
-    }
-    if ((officer.role === 'officer' || officer.role === 'dept_officer') && officer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== officer.departmentId) {
-      throw new Error('Department boundary violation.');
-    }
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: data.incidentId }).lean();
+      if (!incident) throw new Error(`Incident ${data.incidentId} not found.`);
+      if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') {
+        throw new Error('Cannot create inspection for a closed incident.');
+      }
+      if (officer.role === 'officer' && incident.assignedOfficerId && incident.assignedOfficerId !== officer.id) {
+        throw new Error('Field officers may only inspect incidents assigned to them.');
+      }
+      if ((officer.role === 'officer' || officer.role === 'dept_officer') && officer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== officer.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
 
-    const newRecord: any = {
-      ...data,
-      id: inspectionId(),
-      officerId: officer.id,
-      officerName: officer.name,
-      createdAt: nowIso()
-    };
-    await InspectionModel.create(newRecord);
+      const newRecord: any = {
+        ...data,
+        id: await inspectionId(),
+        officerId: officer.id,
+        officerName: officer.name,
+        createdAt: nowIso()
+      };
+      await InspectionModel.create(newRecord, { session });
 
-    if (incident.status === 'confirmed' || incident.status === 'potential') {
-      await IncidentModel.updateOne({ id: incident.id }, { $set: { status: 'in_progress', updatedAt: nowIso() } });
-    }
+      if (incident.status === 'confirmed' || incident.status === 'potential') {
+        await IncidentModel.updateOne({ id: incident.id }, { $set: { status: 'in_progress', updatedAt: nowIso() } }, { session });
+      }
 
-    await this.logAudit({
-      action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incident.id,
-      userId: officer.id, userEmail: officer.email, userRole: officer.role, ipAddress: '127.0.0.1',
-      details: `Field officer ${officer.name} submitted inspection report ${newRecord.id} (Status: ${newRecord.verifiedStatus})`
-    } as any);
+      await this.logAudit({
+        action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incident.id,
+        userId: officer.id, userEmail: officer.email, userRole: officer.role, ipAddress: '127.0.0.1',
+        details: `Field officer ${officer.name} submitted inspection report ${newRecord.id} (Status: ${newRecord.verifiedStatus})`
+      } as any, session);
 
-    const targets = await UserModel.find({ role: { $in: ['dept_officer', 'authority'] } }).lean();
-    for (const doff of targets as any[]) {
-      await this.createNotification({
-        userId: doff.id,
-        title: 'New Field Inspection Submitted',
-        message: `Field officer ${officer.name} submitted inspection ${newRecord.id} for incident ${incident.id}. Requires verification.`,
-        type: 'incident_alert' as any,
-        link: incident.id
-      });
-    }
+      const targets = await UserModel.find({ role: { $in: ['dept_officer', 'authority'] } }).lean();
+      for (const doff of targets as any[]) {
+        await this.createNotification({
+          userId: doff.id,
+          title: 'New Field Inspection Submitted',
+          message: `Field officer ${officer.name} submitted inspection ${newRecord.id} for incident ${incident.id}. Requires verification.`,
+          type: 'incident_alert' as any,
+          link: incident.id
+        }, session);
+      }
 
-    return stripMongo<InspectionRecord>(newRecord)!;
+      return stripMongo<InspectionRecord>(newRecord)!;
+    });
   }
 
   async verifyInspection(inspectionId: string, departmentRemarks: string, reviewer: User, isApproved: boolean): Promise<InspectionRecord> {
-    const record: any = await InspectionModel.findOne({ id: inspectionId }).lean();
-    if (!record) throw new Error(`Inspection ${inspectionId} not found.`);
-    const incident: any = await IncidentModel.findOne({ id: record.incidentId }).lean();
-    if (!incident) throw new Error(`Incident ${record.incidentId} not found.`);
-    if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') {
-      throw new Error('Cannot verify inspections for a closed incident.');
-    }
-    if (reviewer.role === 'dept_officer' && reviewer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reviewer.departmentId) {
-      throw new Error('Department boundary violation.');
-    }
+    return withTransaction(async (session) => {
+      const record: any = await InspectionModel.findOne({ id: inspectionId }).lean();
+      if (!record) throw new Error(`Inspection ${inspectionId} not found.`);
+      const incident: any = await IncidentModel.findOne({ id: record.incidentId }).lean();
+      if (!incident) throw new Error(`Incident ${record.incidentId} not found.`);
+      if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') {
+        throw new Error('Cannot verify inspections for a closed incident.');
+      }
+      if (reviewer.role === 'dept_officer' && reviewer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reviewer.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
 
-    const now = nowIso();
-    const recPatch: any = { departmentVerified: isApproved, departmentRemarks, verifiedByOfficerId: reviewer.id, verifiedByOfficerName: reviewer.name, verifiedAt: now };
-    await InspectionModel.updateOne({ id: inspectionId }, { $set: recPatch });
+      const now = nowIso();
+      const recPatch: any = { departmentVerified: isApproved, departmentRemarks, verifiedByOfficerId: reviewer.id, verifiedByOfficerName: reviewer.name, verifiedAt: now };
+      await InspectionModel.updateOne({ id: inspectionId }, { $set: recPatch }, { session });
 
-    if (isApproved) {
-      await IncidentModel.updateOne({ id: incident.id }, { $set: { status: 'in_progress', reviewNotes: `Inspection ${record.id} verified: ${departmentRemarks}` } });
-    }
+      if (isApproved) {
+        await IncidentModel.updateOne({ id: incident.id }, { $set: { status: 'in_progress', reviewNotes: `Inspection ${record.id} verified: ${departmentRemarks}` } }, { session });
+      }
 
-    await this.logAudit({
-      action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incident.id,
-      userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
-      details: `Department Officer ${reviewer.name} ${isApproved ? 'approved' : 'rejected'} inspection ${record.id}`
-    } as any);
+      await this.logAudit({
+        action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incident.id,
+        userId: reviewer.id, userEmail: reviewer.email, userRole: reviewer.role, ipAddress: '127.0.0.1',
+        details: `Department Officer ${reviewer.name} ${isApproved ? 'approved' : 'rejected'} inspection ${record.id}`
+      } as any, session);
 
-    const updated = await InspectionModel.findOne({ id: inspectionId }).lean();
-    return stripMongo<InspectionRecord>(updated)!;
+      const updated = await InspectionModel.findOne({ id: inspectionId }).lean();
+      return stripMongo<InspectionRecord>(updated)!;
+    });
   }
 
   async assignIncidentOfficer(incidentId: string, departmentId: string, officerId: string, officerName: string, adminUser: User, notes: string): Promise<Incident> {
-    const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
-    if (!incident) throw new Error(`Incident ${incidentId} not found.`);
-    if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot assign a closed incident.');
-    if (!departmentId || !departmentId.trim()) throw new Error('Target department is required.');
-    if (adminUser.role === 'dept_officer' && adminUser.departmentId && adminUser.departmentId !== departmentId) throw new Error('Department boundary violation.');
-    if (adminUser.role === 'dept_officer' && adminUser.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== adminUser.departmentId) throw new Error('Department boundary violation.');
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error(`Incident ${incidentId} not found.`);
+      if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot assign a closed incident.');
+      if (!departmentId || !departmentId.trim()) throw new Error('Target department is required.');
+      if (adminUser.role === 'dept_officer' && adminUser.departmentId && adminUser.departmentId !== departmentId) throw new Error('Department boundary violation.');
+      if (adminUser.role === 'dept_officer' && adminUser.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== adminUser.departmentId) throw new Error('Department boundary violation.');
 
-    const assignee: any = await UserModel.findOne({ id: officerId }).lean();
-    if (!assignee) throw new Error(`Officer ${officerId} not found.`);
-    if (assignee.role !== 'officer') throw new Error('Assignments may only target field officers.');
-    if (assignee.status !== 'active') throw new Error('Assigned officer must be active.');
-    if (assignee.departmentId !== departmentId) throw new Error('Assigned officer must belong to the target department.');
+      const assignee: any = await UserModel.findOne({ id: officerId }).lean();
+      if (!assignee) throw new Error(`Officer ${officerId} not found.`);
+      if (assignee.role !== 'officer') throw new Error('Assignments may only target field officers.');
+      if (assignee.status !== 'active') throw new Error('Assigned officer must be active.');
+      if (assignee.departmentId !== departmentId) throw new Error('Assigned officer must belong to the target department.');
 
-    const dept: any = await DepartmentModel.findOne({ id: departmentId }).lean();
-    const now = nowIso();
-    const patch: any = {
-      assignedDepartmentId: departmentId,
-      assignedOfficerId: officerId,
-      assignedOfficerName: assignee.name || officerName,
-      status: 'in_progress',
-      updatedAt: now
-    };
-    if (dept) patch.assignedDepartmentName = dept.name;
-    await IncidentModel.updateOne({ id: incidentId }, { $set: patch });
+      const dept: any = await DepartmentModel.findOne({ id: departmentId }).lean();
+      const now = nowIso();
+      const patch: any = {
+        assignedDepartmentId: departmentId,
+        assignedOfficerId: officerId,
+        assignedOfficerName: assignee.name || officerName,
+        status: 'in_progress',
+        updatedAt: now
+      };
+      if (dept) patch.assignedDepartmentName = dept.name;
+      await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
 
-    const asgn: Assignment = {
-      id: assignmentId(), incidentId, departmentId, departmentName: dept?.name || departmentId,
-      officerId, officerName, assignedBy: adminUser.name, notes: notes || '', status: 'assigned', assignedAt: now
-    } as any;
-    await AssignmentModel.create(asgn);
+      const asgn: Assignment = {
+        id: await assignmentId(), incidentId, departmentId, departmentName: dept?.name || departmentId,
+        officerId, officerName, assignedBy: adminUser.name, notes: notes || '', status: 'assigned', assignedAt: now
+      } as any;
+      await AssignmentModel.create(asgn, { session });
 
-    await this.createNotification({
-      userId: officerId,
-      title: 'New Incident Work Order Assigned',
-      message: `You have been assigned as lead field investigator for incident ${incidentId} (${incident.title}).`,
-      type: 'assignment' as any,
-      link: incidentId
+      await this.createNotification({
+        userId: officerId,
+        title: 'New Incident Work Order Assigned',
+        message: `You have been assigned as lead field investigator for incident ${incidentId} (${incident.title}).`,
+        type: 'assignment' as any,
+        link: incidentId
+      }, session);
+
+      await this.logAudit({
+        action: 'INCIDENT_ASSIGNED', module: 'incidents', recordId: incidentId,
+        userId: adminUser.id, userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
+        details: `Assigned incident ${incidentId} to ${officerName} (${dept?.name || departmentId})`
+      } as any, session);
+
+      const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
     });
-
-    await this.logAudit({
-      action: 'INCIDENT_ASSIGNED', module: 'incidents', recordId: incidentId,
-      userId: adminUser.id, userEmail: adminUser.email, userRole: adminUser.role, ipAddress: '127.0.0.1',
-      details: `Assigned incident ${incidentId} to ${officerName} (${dept?.name || departmentId})`
-    } as any);
-
-    const updated = await IncidentModel.findOne({ id: incidentId }).lean();
-    return stripMongo<Incident>(updated)!;
   }
 
   async escalateIncident(incidentId: string, user: User, reason: string): Promise<Incident> {
-    const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
-    if (!incident) throw new Error(`Incident ${incidentId} not found.`);
-    if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot escalate a closed incident.');
-    if (user.role === 'dept_officer' && user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== user.departmentId) {
-      throw new Error('Department boundary violation.');
-    }
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error(`Incident ${incidentId} not found.`);
+      if (incident.status === 'resolved' || incident.status === 'dismissed' || incident.status === 'closed') throw new Error('Cannot escalate a closed incident.');
+      if (user.role === 'dept_officer' && user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== user.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
 
-    const now = nowIso();
-    const patch = {
-      priority: 'P1_CRITICAL',
-      severity: 'critical',
-      reviewNotes: `[ESCALATED by ${user.name} on ${new Date().toLocaleDateString()}]: ${reason}`,
-      updatedAt: now
-    };
-    await IncidentModel.updateOne({ id: incidentId }, { $set: patch });
+      const now = nowIso();
+      const patch = {
+        priority: 'P1_CRITICAL',
+        severity: 'critical',
+        reviewNotes: `[ESCALATED by ${user.name} on ${new Date().toLocaleDateString()}]: ${reason}`,
+        updatedAt: now
+      };
+      await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
 
-    await this.logAudit({
-      action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incidentId,
-      userId: user.id, userEmail: user.email, userRole: user.role, ipAddress: '127.0.0.1',
-      details: `Escalated incident ${incidentId} to P1_CRITICAL. Reason: ${reason}`
-    } as any);
+      await this.logAudit({
+        action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incidentId,
+        userId: user.id, userEmail: user.email, userRole: user.role, ipAddress: '127.0.0.1',
+        details: `Escalated incident ${incidentId} to P1_CRITICAL. Reason: ${reason}`
+      } as any, session);
 
-    const authorities = await UserModel.find({ role: { $in: ['authority', 'admin'] } }).lean();
-    for (const auth of authorities as any[]) {
-      await this.createNotification({
-        userId: auth.id,
-        title: 'CRITICAL ESCALATION: Incident P1 Priority',
-        message: `Incident ${incidentId} escalated by ${user.name}: "${reason}"`,
-        type: 'incident_alert' as any,
-        link: incidentId
-      });
-    }
+      const authorities = await UserModel.find({ role: { $in: ['authority', 'admin'] } }).lean();
+      for (const auth of authorities as any[]) {
+        await this.createNotification({
+          userId: auth.id,
+          title: 'CRITICAL ESCALATION: Incident P1 Priority',
+          message: `Incident ${incidentId} escalated by ${user.name}: "${reason}"`,
+          type: 'incident_alert' as any,
+          link: incidentId
+        }, session);
+      }
 
-    const updated = await IncidentModel.findOne({ id: incidentId }).lean();
-    return stripMongo<Incident>(updated)!;
+      const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
+    });
   }
 
   async evaluateClassifier(): Promise<ModelEvaluationMetrics> {
@@ -915,4 +1002,57 @@ export class MongoScipRepository implements IScipRepository {
       dataHealthGrade: `${grade} (heuristic data-quality signal; not a production certification)`
     };
   }
+
+  // --- India Administrative Locations (not parity integrated) ---
+  getAdminStates() { return notParity('getAdminStates'); }
+  getAdminStateById() { return notParity('getAdminStateById'); }
+  createAdminState() { return notParity('createAdminState'); }
+  updateAdminState() { return notParity('updateAdminState'); }
+  deleteAdminState() { return notParity('deleteAdminState'); }
+  getAdminDistricts() { return notParity('getAdminDistricts'); }
+  getAdminDistrictById() { return notParity('getAdminDistrictById'); }
+  createAdminDistrict() { return notParity('createAdminDistrict'); }
+  updateAdminDistrict() { return notParity('updateAdminDistrict'); }
+  deleteAdminDistrict() { return notParity('deleteAdminDistrict'); }
+  getAdminSubDistricts() { return notParity('getAdminSubDistricts'); }
+  getAdminSubDistrictById() { return notParity('getAdminSubDistrictById'); }
+  createAdminSubDistrict() { return notParity('createAdminSubDistrict'); }
+  updateAdminSubDistrict() { return notParity('updateAdminSubDistrict'); }
+  deleteAdminSubDistrict() { return notParity('deleteAdminSubDistrict'); }
+  getAdminBlocks() { return notParity('getAdminBlocks'); }
+  getAdminBlockById() { return notParity('getAdminBlockById'); }
+  createAdminBlock() { return notParity('createAdminBlock'); }
+  updateAdminBlock() { return notParity('updateAdminBlock'); }
+  deleteAdminBlock() { return notParity('deleteAdminBlock'); }
+  getAdminLocalities() { return notParity('getAdminLocalities'); }
+  getAdminLocalityById() { return notParity('getAdminLocalityById'); }
+  createAdminLocality() { return notParity('createAdminLocality'); }
+  updateAdminLocality() { return notParity('updateAdminLocality'); }
+  deleteAdminLocality() { return notParity('deleteAdminLocality'); }
+  getAdministrativeBoundaries() { return notParity('getAdministrativeBoundaries'); }
+  getAdministrativeBoundaryById() { return notParity('getAdministrativeBoundaryById'); }
+  createAdministrativeBoundary() { return notParity('createAdministrativeBoundary'); }
+  updateAdministrativeBoundary() { return notParity('updateAdministrativeBoundary'); }
+  deleteAdministrativeBoundary() { return notParity('deleteAdministrativeBoundary'); }
+
+  // --- IP Security Logs (not parity integrated) ---
+  createIPSecurityLog() { return notParity('createIPSecurityLog'); }
+  getIPSecurityLogs() { return notParity('getIPSecurityLogs'); }
+  getIPSecurityLogById() { return notParity('getIPSecurityLogById'); }
+  deleteIPSecurityLogsOlderThan() { return notParity('deleteIPSecurityLogsOlderThan'); }
+
+  // --- Geographic Jurisdiction & Assignment (not parity integrated) ---
+  findAdministrativeJurisdiction() { return notParity('findAdministrativeJurisdiction'); }
+  getOfficersByJurisdiction() { return notParity('getOfficersByJurisdiction'); }
+  updateUserJurisdiction() { return notParity('updateUserJurisdiction'); }
+
+  // --- Backup / Restore (not parity integrated) ---
+  createBackup() { return notParity('createBackup'); }
+  listBackups() { return notParity('listBackups'); }
+  pruneBackups() { return notParity('pruneBackups'); }
+  restoreFromBackup() { return notParity('restoreFromBackup'); }
+
+  // --- Data Deletion (not parity integrated) ---
+  deleteUser() { return notParity('deleteUser'); }
 }
+

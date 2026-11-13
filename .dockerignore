@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+.env
+*.log
+.scip_database.json
+backups/

@@ -14,7 +14,14 @@ import {
   Feedback,
   UserRole,
   InspectionRecord,
-  ModelEvaluationMetrics
+  ModelEvaluationMetrics,
+  AdminState,
+  AdminDistrict,
+  AdminSubDistrict,
+  AdminBlock,
+  AdminLocality,
+  IPSecurityLog,
+  AdministrativeBoundary
 } from '../types/scip.js';
 
 const TOKEN_KEY = 'scip_auth_token';
@@ -96,13 +103,22 @@ class APIClient {
   // --- Public API Methods ---
 
   // Auth
-  public async register(payload: { name: string; email: string; password: string; role?: UserRole; phone?: string }) {
+  public async register(payload: { name: string; email: string; password: string; role?: UserRole; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string }) {
     const res = await this.request<{ success: boolean; data: { user: User; token: string } }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
     this.setToken(res.data.token);
     this.setStoredUser(res.data.user);
+    return res.data;
+  }
+
+  // Admin-only privileged member registration (requires admin.manage)
+  public async registerPrivilegedMember(payload: { name: string; email: string; password: string; role: UserRole; phone?: string; departmentId?: string }) {
+    const res = await this.request<{ success: boolean; data: User }>('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
     return res.data;
   }
 
@@ -267,6 +283,47 @@ class APIClient {
     return res.data;
   }
 
+  // Locations
+  public async getStates() {
+    const res = await this.request<{ success: boolean; data: AdminState[] }>('/api/locations/states');
+    return res.data;
+  }
+
+  public async getDistricts(stateId?: string) {
+    const query = stateId ? `?stateId=${encodeURIComponent(stateId)}` : '';
+    const res = await this.request<{ success: boolean; data: AdminDistrict[] }>(`/api/locations/districts${query}`);
+    return res.data;
+  }
+
+  public async getSubDistricts(districtId?: string) {
+    const query = districtId ? `?districtId=${encodeURIComponent(districtId)}` : '';
+    const res = await this.request<{ success: boolean; data: AdminSubDistrict[] }>(`/api/locations/sub-districts${query}`);
+    return res.data;
+  }
+
+  public async getBlocks(subDistrictId?: string) {
+    const query = subDistrictId ? `?subDistrictId=${encodeURIComponent(subDistrictId)}` : '';
+    const res = await this.request<{ success: boolean; data: AdminBlock[] }>(`/api/locations/blocks${query}`);
+    return res.data;
+  }
+
+  public async getLocalities(blockId?: string) {
+    const query = blockId ? `?blockId=${encodeURIComponent(blockId)}` : '';
+    const res = await this.request<{ success: boolean; data: AdminLocality[] }>(`/api/locations/localities${query}`);
+    return res.data;
+  }
+
+  // Geoanalytics
+  public async getGeoAnalytics() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/geoanalytics/overview');
+    return res.data;
+  }
+
+  public async getGeoAnalyticsHotspots() {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/geoanalytics/hotspots');
+    return res.data;
+  }
+
   // Misc
   public async getNotifications() {
     const res = await this.request<{ success: boolean; data: Notification[]; unreadCount: number }>('/api/notifications');
@@ -296,7 +353,7 @@ class APIClient {
     });
   }
 
-  public async updateProfile(payload: { name?: string; phone?: string }) {
+  public async updateProfile(payload: { name?: string; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string }) {
     const res = await this.request<{ success: boolean; data: User }>('/api/auth/profile', {
       method: 'PUT',
       body: JSON.stringify(payload)
@@ -403,6 +460,108 @@ class APIClient {
         body: JSON.stringify({ reason })
       }
     );
+    return res.data;
+  }
+
+  // Geographic jurisdiction & officer recommendation
+  public async getJurisdiction(lat: number, lng: number) {
+    const res = await this.request<{ success: boolean; data: { stateId?: string; stateName?: string; districtId?: string; districtName?: string; subDistrictId?: string; subDistrictName?: string; blockId?: string; blockName?: string; localityId?: string; localityName?: string; withinKnownBoundary: boolean; coordinate: { latitude: number; longitude: number } } }>(
+      `/api/incidents/jurisdiction?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`
+    );
+    return res.data;
+  }
+
+  public async getRecommendedOfficers(lat: number, lng: number, departmentId?: string) {
+    const query = departmentId ? `&departmentId=${encodeURIComponent(departmentId)}` : '';
+    const res = await this.request<{ success: boolean; data: { id: string; name: string; departmentId: string; departmentName: string }[] }>(
+      `/api/incidents/recommended-officers?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}${query}`
+    );
+    return res.data;
+  }
+
+  public async flagReview(incidentId: string, payload: { reason: string; reviewType?: string }) {
+    const res = await this.request<{ success: boolean; data: { incidentId: string; reviewType: string; reason: string; jurisdiction: any } }>(
+      `/api/incidents/${incidentId}/flag-review`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }
+    );
+    return res.data;
+  }
+
+  // IP Security Logs
+  public async getIpLogs(params?: { limit?: number }) {
+    const query = params?.limit !== undefined ? `?limit=${params.limit}` : '';
+    const res = await this.request<{ success: boolean; data: IPSecurityLog[] }>(`/api/iplogs${query}`);
+    return res.data;
+  }
+
+  public async deleteIpLogsRetention(days: number) {
+    const res = await this.request<{ success: boolean; message: string }>('/api/iplogs/retention', {
+      method: 'DELETE',
+      body: JSON.stringify({ days })
+    });
+    return res;
+  }
+
+  // Administrative Boundaries
+  public async getBoundaries() {
+    const res = await this.request<{ success: boolean; data: AdministrativeBoundary[] }>('/api/locations/boundaries');
+    return res.data;
+  }
+
+  // Geoanalytics distribution & hotspots
+  public async getStateDistribution(params?: { from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/state-distribution?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getDistrictDistribution(params?: { stateId?: string; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.stateId) query.set('stateId', params.stateId);
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/district-distribution?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getLocalityDistribution(params?: { districtId?: string; blockId?: string; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.districtId) query.set('districtId', params.districtId);
+    if (params?.blockId) query.set('blockId', params.blockId);
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/locality-distribution?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getGeoHotspots(params?: { minReports?: string; radiusMeters?: string; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.minReports) query.set('minReports', params.minReports);
+    if (params?.radiusMeters) query.set('radiusMeters', params.radiusMeters);
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/hotspots?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getResolutionTimeByDistrict(params?: { from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/resolution-time-by-district?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getPendingConcentration(params?: { from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/geoanalytics/pending-concentration?${query.toString()}`);
     return res.data;
   }
 

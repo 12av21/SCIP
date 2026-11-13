@@ -1,7 +1,7 @@
 // SCIP - Official Citizen & Officer Authentication Modal (Government Digital Portal)
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { UserRole } from '../../types/scip';
+import type { UserRole } from '../../types/scip.js';
 import {
   Lock,
   Mail,
@@ -44,7 +44,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPhone, setSignupPhone] = useState('');
-  const [signupRole, setSignupRole] = useState<UserRole>('citizen');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -147,15 +146,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
+      // Public registration always creates a citizen account. Role is enforced server-side.
       await register({
         name: signupName,
         email: signupEmail,
         password: signupPassword,
-        role: signupRole,
         phone: signupPhone || undefined
       });
       onClose();
-      navigateForRole(signupRole);
+      navigateForRole('citizen');
     } catch (err: any) {
       setErrorMessage(err.message || 'Registration failed. An account with this email may already exist.');
     } finally {
@@ -425,7 +424,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-[#253443] mb-1">
                     Email Address
@@ -460,52 +459,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[#253443] mb-1">
-                  Intended Platform Role
-                </label>
-                <select
-                  value={signupRole}
-                  onChange={e => setSignupRole(e.target.value as UserRole)}
-                  className="w-full text-xs px-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
-                >
-                  <option value="citizen">Citizen (Community Member — Observations & Status Tracking)</option>
-                  <option value="officer">Field Officer (Department Responder — Physical Investigations)</option>
-                  <option value="dept_officer">Department Desk Officer (Queue Triage & Verification Approval)</option>
-                  <option value="analyst">Data & AI Analyst (Model Diagnostics & Longitudinal Trends)</option>
-                  <option value="authority">Municipal Authority (Director — Command Dashboard & Decisions)</option>
-                  <option value="admin">System Administrator (Governance, Audits & Platform Config)</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#253443] mb-1">
-                    Password (Min. 8)
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={signupPassword}
-                    onChange={e => setSignupPassword(e.target.value)}
-                    placeholder="Create secure password"
-                    className="w-full text-xs px-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-[#253443] mb-1">
-                    Confirm Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={signupConfirmPassword}
-                    onChange={e => setSignupConfirmPassword(e.target.value)}
-                    placeholder="Confirm password"
-                    className="w-full text-xs px-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
-                  />
-                </div>
+              <div className="p-2.5 rounded-md bg-[#EAF2F8] border border-[#B9D5EB] text-[11px] text-[#153E63] flex items-start gap-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#1F5F91] shrink-0 mt-0.5" />
+                <span>Public registration always creates a <strong>Citizen</strong> account. Privileged member registration (Officer, Analyst, Authority, Admin) is restricted to authorized administrators via the Governance Console.</span>
               </div>
 
               <div className="pt-1">

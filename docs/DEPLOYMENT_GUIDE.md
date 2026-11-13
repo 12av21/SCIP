@@ -90,12 +90,20 @@ NODE_ENV=production npm run start
 - GitHub Actions workflow: `.github/workflows/ci.yml` (typecheck, build, isolated tests, `npm audit --omit=dev`).
 - CI success != production readiness. Add environment-specific deployment gates, secret scanning, SAST/DAST as appropriate, and staged rollout controls externally.
 
-## 9. Containerization (optional guidance)
+## 9. Containerization
 
-No production-certified Dockerfile is mandated by this guide. If containerizing:
-- Use multi-stage build, run as non-root, mount persistent storage for JSON DB (single instance) or adopt approved DB architecture.
+A production Dockerfile is provided at the repository root. Build and run:
+
+```bash
+docker build -t scip-platform .
+docker run -p 3000:3000 --env-file .env scip-platform
+```
+
+Required runtime env: `JWT_SECRET` (>=32 chars), `NODE_ENV=production`, `SCIP_TRUST_PROXY=true` when behind a reverse proxy.
+- Use multi-stage build, run as non-root, mount persistent storage for JSON DB (single instance).
 - Inject secrets at runtime; do not bake `.env`/DB files into images.
 - Healthcheck against `GET /api/health`.
+- `scip_data` volume holds `.scip_database.json` and `backups/` — preserve across container restarts.
 
 ## 10. Explicit prohibitions
 

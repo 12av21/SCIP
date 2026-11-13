@@ -1,6 +1,6 @@
 // Smart Community Intelligence Platform (SCIP) - Master Application Shell
 // Redesigned with Indian Government Digital Portal standard inspired by MyGov.in
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
@@ -20,10 +20,11 @@ import { IntelligenceDashboard } from './components/views/IntelligenceDashboard'
 import { IncidentManagementView } from './components/views/IncidentManagementView';
 import { ReportInvestigationView } from './components/views/ReportInvestigationView';
 import { GeospatialIntelligenceView } from './components/views/GeospatialIntelligenceView';
+import { GeoAnalyticsView } from './components/views/GeoAnalyticsView';
 import { TrendAnalysisView } from './components/views/TrendAnalysisView';
-import { AgentConsoleView } from './components/views/AgentConsoleView';
-import { AdminPanelView } from './components/views/AdminPanelView';
-import { TestRunnerView } from './components/views/TestRunnerView';
+const AgentConsoleLazy = React.lazy(() => import('./components/views/AgentConsoleView').then(m => ({ default: m.AgentConsoleView })));
+const AdminPanelLazy = React.lazy(() => import('./components/views/AdminPanelView').then(m => ({ default: m.AdminPanelView })));
+const TestRunnerLazy = React.lazy(() => import('./components/views/TestRunnerView').then(m => ({ default: m.TestRunnerView })));
 import { FieldOfficerDashboard } from './components/views/FieldOfficerDashboard';
 import { DeptOfficerDashboard } from './components/views/DeptOfficerDashboard';
 import { DataAnalystDashboard } from './components/views/DataAnalystDashboard';
@@ -84,6 +85,7 @@ function SCIPMainLayout() {
       case 'incidents': return t('nav.incident_queue', 'Operations / Incident Queue');
       case 'investigation': return language === 'HI' ? 'फॉरेंसिक अन्वेषण' : 'Forensic Investigation';
       case 'map': return t('nav.geospatial_map', 'Geospatial Intelligence Map');
+      case 'geo-analytics': return t('nav.geo_analytics', 'Geographic Analytics Dashboard');
       case 'trends': return t('nav.trends_recurrence', 'Trends & Recurrence Analytics');
       case 'agent': return t('nav.scip_agent', 'Decision Support Agent');
       case 'admin-panel': return t('nav.admin_governance', 'Administration & Audit Trail');
@@ -231,6 +233,10 @@ function SCIPMainLayout() {
           <GeospatialIntelligenceView />
         )}
 
+        {currentTab === 'geo-analytics' && (
+          <GeoAnalyticsView />
+        )}
+
         {currentTab === 'trends' && (
           <TrendAnalysisView />
         )}
@@ -248,15 +254,21 @@ function SCIPMainLayout() {
         )}
 
         {currentTab === 'agent' && (
-          <AgentConsoleView />
+          <Suspense fallback={null}>
+            <AgentConsoleLazy />
+          </Suspense>
         )}
 
         {currentTab === 'admin-panel' && (
-          <AdminPanelView />
+          <Suspense fallback={null}>
+            <AdminPanelLazy />
+          </Suspense>
         )}
 
         {currentTab === 'tests' && (
-          <TestRunnerView />
+          <Suspense fallback={null}>
+            <TestRunnerLazy />
+          </Suspense>
         )}
       </main>
 

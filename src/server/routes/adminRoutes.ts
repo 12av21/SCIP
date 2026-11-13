@@ -1,10 +1,18 @@
 // SCIP Backend - Administrative & Governance Routes
 
 import { Router, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { db } from '../../database/index.js';
+import { SCIPDatabase } from '../../database/scipDatabase.js';
 import { authenticate, AuthenticatedRequest, requirePermission, requireRole } from '../middleware/auth.js';
-
+import { UserRole } from '../../types/scip.js';
 const router = Router();
+
+function sanitizeAuthUser(user: any) {
+  if (!user) return user;
+  const { passwordHash, sessionVersion, credentialsResetRequired, ...safe } = user;
+  return safe;
+}
 
 function maskIp(ip: unknown): string {
   if (typeof ip !== 'string' || !ip.trim()) return 'unknown';
@@ -114,6 +122,123 @@ router.get('/system-stats', authenticate, requireRole(['authority', 'admin']), a
       database: { status: 'CONNECTED_IN_MEMORY_PERSISTED', usersCount: users.length, reportsCount: reports.length, incidentsCount: incidents.length, auditLogsCount: auditLogs.length }
     }
   });
+});
+
+// Admin-only privileged member registration. Public /api/auth/register always yields citizen.
+router.post('/users', authenticate, requirePermission('admin.manage'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { name, email, password, role, phone, departmentId } = req.body || {};
+    if (typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
+      res.status(400).json({ success: false, message: 'Name, email, and password are required.', errors: ['Missing required fields.'] }); return;
+    }
+    const safeName = name.trim();
+    const safeEmail = email.trim().toLowerCase();
+    if (!safeName || !safeEmail || !password) { res.status(400).json({ success: false, message: 'Name, email, and password are required.', errors: ['Missing required fields.'] }); return; }
+    if (safeName.length > 100) { res.status(400).json({ success: false, message: 'Name must be 100 characters or fewer.', errors: ['Invalid name.'] }); return; }
+    if (phone !== undefined && (typeof phone !== 'string' || phone.trim().length > 30)) { res.status(400).json({ success: false, message: 'Phone must be 30 characters or fewer.', errors: ['Invalid phone.'] }); return; }
+    if (password.length < 8 || password.length > 128) { res.status(400).json({ success: false, message: 'Password must be 8-128 characters in length.', errors: ['Weak password.'] }); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(safeEmail) || safeEmail.length > 254) { res.status(400).json({ success: false, message: 'Please provide a valid email address.', errors: ['Invalid email format.'] }); return; }
+    const allowedRoles: UserRole[] = ['citizen', 'officer', 'dept_officer', 'analyst', 'authority', 'admin'];
+    const requestedRole = typeof role === 'string' ? role : 'citizen';
+    if (!allowedRoles.includes(requestedRole as any)) { res.status(400).json({ success: false, message: 'Invalid role.', errors: ['Role must be one of: ' + allowedRoles.join(', ')] }); return; }
+    if (departmentId !== undefined && (typeof departmentId !== 'string' || departmentId.trim().length > 64)) { res.status(400).json({ success: false, message: 'Invalid department id.', errors: ['Invalid departmentId.'] }); return; }
+    const existing = await db.getUserByEmailWithPassword(safeEmail);
+    if (existing) { res.status(409).json({ success: false, message: 'An account with this email address already exists.', errors: ['Duplicate email.'] }); return; }
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+    const newUser = await db.createUser({
+      name: safeName, email: safeEmail, passwordHash, role: requestedRole as UserRole,
+      phone: typeof phone === 'string' ? phone.trim() : undefined,
+      departmentId: typeof departmentId === 'string' ? departmentId.trim() : undefined,
+      status: 'active', sessionVersion: 0, credentialsResetRequired: false
+    } as any);
+    await db.logAudit({
+      action: 'PRIVILEGED_MEMBER_REGISTERED', module: 'admin', userId: newUser.id, userEmail: newUser.email,
+      userRole: newUser.role, ipAddress: req.ip || '127.0.0.1',
+      details: `Privileged member registered with role '${newUser.role}' by admin ${req.user!.email}`
+    });
+    res.status(201).json({ success: true, message: 'Privileged member registered successfully.', data: sanitizeAuthUser(newUser) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to register privileged member.', errors: [process.env.NODE_ENV === 'production' ? 'Registration failed.' : err.message] });
+  }
+});
+
+// --- Backup / Restore (admin only) ---
+
+router.post('/backup', authenticate, requirePermission('admin.manage'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { backupDir } = req.body || {};
+    const result = await db.createBackup(typeof backupDir === 'string' ? backupDir : undefined);
+    await db.logAudit({
+      action: 'SECURITY_EVENT', module: 'security',
+      userId: req.user!.id, userEmail: req.user!.email, userRole: req.user!.role,
+      ipAddress: req.ip || '127.0.0.1',
+      details: `Database backup created: ${result.backupFile} (${result.recordCount} records)`
+    });
+    res.json({
+      success: true,
+      message: 'Database backup created successfully.',
+      data: { backupFile: result.backupFile, recordCount: result.recordCount, savedAt: result.savedAt }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Backup failed.', errors: [process.env.NODE_ENV === 'production' ? 'Backup failed.' : err.message] });
+  }
+});
+
+router.get('/backups', authenticate, requirePermission('admin.manage'), async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { backupDir } = _req.query;
+    const backups = await db.listBackups(typeof backupDir === 'string' ? backupDir : undefined);
+    res.json({ success: true, data: backups, meta: { total: backups.length } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to list backups.', errors: [process.env.NODE_ENV === 'production' ? 'Backup list failed.' : err.message] });
+  }
+});
+
+router.delete('/backups/prune', authenticate, requirePermission('admin.manage'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { retentionCount, backupDir } = req.body || {};
+    const parsed = Number(retentionCount);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      res.status(400).json({ success: false, message: 'retentionCount must be a positive integer.' }); return;
+    }
+    const result = await db.pruneBackups(parsed, typeof backupDir === 'string' ? backupDir : undefined);
+    res.json({ success: true, message: `Pruned ${result.pruned} old backups.`, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Prune failed.', errors: [process.env.NODE_ENV === 'production' ? 'Prune failed.' : err.message] });
+  }
+});
+
+router.post('/restore-rehearsal', authenticate, requirePermission('admin.manage'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { backupFile } = req.body || {};
+    if (typeof backupFile !== 'string' || !backupFile.trim()) {
+      res.status(400).json({ success: false, message: 'backupFile is required.' }); return;
+    }
+    // Restore into an isolated in-memory instance for verification only; does not modify active DB.
+    const restored = await db.restoreFromBackup(backupFile.trim());
+    const counts = {
+      users: restored.getUsers ? restored.getUsers().length : 0,
+      reports: restored.getReports ? restored.getReports().length : 0,
+      incidents: restored.getIncidents ? restored.getIncidents().length : 0,
+      auditLogs: restored.getAuditLogs ? restored.getAuditLogs().length : 0,
+      ipSecurityLogs: restored.getIPSecurityLogs ? restored.getIPSecurityLogs().length : 0,
+    };
+    await db.logAudit({
+      action: 'SECURITY_EVENT', module: 'security',
+      userId: req.user!.id, userEmail: req.user!.email, userRole: req.user!.role,
+      ipAddress: req.ip || '127.0.0.1',
+      details: `Restore rehearsal verified from backup: ${backupFile} (users:${counts.users} reports:${counts.reports} incidents:${counts.incidents})`
+    });
+    res.json({
+      success: true,
+      message: 'Restore rehearsal verified successfully (isolated, active DB unchanged).',
+      data: { backupFile, restoredCounts: counts }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Restore rehearsal failed.', errors: [process.env.NODE_ENV === 'production' ? 'Restore rehearsal failed.' : err.message] });
+  }
 });
 
 export default router;

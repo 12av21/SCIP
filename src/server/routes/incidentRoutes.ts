@@ -40,6 +40,115 @@ router.get('/', authenticate, requirePermission('incident.read'), async (req: Au
   res.json({ success: true, data: incidents, meta: { total: incidents.length } });
 });
 
+// GET /api/incidents/jurisdiction — determine administrative jurisdiction from coordinates
+router.get('/jurisdiction', authenticate, requirePermission('location.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { lat, lng } = req.query;
+  const latitude = lat !== undefined ? Number(lat) : NaN;
+  const longitude = lng !== undefined ? Number(lng) : NaN;
+
+  if (!Number.isFinite(latitude) || latitude < -180 || latitude > 180 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    res.status(400).json({ success: false, message: 'Valid latitude (-180 to 180) and longitude (-180 to 180) are required.' });
+    return;
+  }
+
+  const jurisdiction = await db.findAdministrativeJurisdiction(latitude, longitude);
+  res.json({
+    success: true,
+    data: { ...jurisdiction, coordinate: { latitude, longitude } },
+    meta: {
+      coordinate: { latitude, longitude },
+      withinKnownBoundary: jurisdiction.withinKnownBoundary,
+      recommendation: jurisdiction.withinKnownBoundary
+        ? 'Complaint falls within known administrative boundary.'
+        : 'Complaint falls outside known administrative boundary. Flag for authorized manual review.'
+    }
+  });
+});
+
+// GET /api/incidents/recommended-officers — recommend officers by geographic jurisdiction
+router.get('/recommended-officers', authenticate, requirePermission('location.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { lat, lng, departmentId } = req.query;
+  const latitude = lat !== undefined ? Number(lat) : NaN;
+  const longitude = lng !== undefined ? Number(lng) : NaN;
+
+  if (!Number.isFinite(latitude) || latitude < -180 || latitude > 180 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    res.status(400).json({ success: false, message: 'Valid latitude and longitude are required.' });
+    return;
+  }
+
+  const jurisdiction = await db.findAdministrativeJurisdiction(latitude, longitude);
+
+  if (!jurisdiction.withinKnownBoundary) {
+    res.json({
+      success: true,
+      data: [],
+      meta: {
+        coordinate: { latitude, longitude },
+        withinKnownBoundary: false,
+        message: 'No geographic jurisdiction match; officers cannot be recommended automatically.'
+      }
+    });
+    return;
+  }
+
+  const officers = await db.getOfficersByJurisdiction({
+    stateId: jurisdiction.stateId,
+    districtId: jurisdiction.districtId,
+    subDistrictId: jurisdiction.subDistrictId,
+    blockId: jurisdiction.blockId,
+    localityId: jurisdiction.localityId,
+    departmentId: departmentId !== undefined ? String(departmentId) : undefined
+  });
+
+  res.json({
+    success: true,
+    data: officers.map(o => ({ id: o.id, name: o.name, departmentId: o.departmentId, departmentName: o.departmentName })),
+    meta: {
+      coordinate: { latitude, longitude },
+      jurisdiction,
+      withinKnownBoundary: true,
+      officerCount: officers.length
+    }
+  });
+});
+
+// POST /api/incidents/:id/flag-review — flag complaint for authorized manual review
+router.post('/:id/flag-review', authenticate, requirePermission('geoanalytics.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { reason, reviewType = 'geographic_boundary' } = req.body || {};
+    const incidentId = req.params.id;
+    if (typeof reason !== 'string' || !reason.trim()) {
+      res.status(400).json({ success: false, message: 'Review reason is required.' });
+      return;
+    }
+
+    const incident = await db.getIncidentById(incidentId);
+    if (!incident) { res.status(404).json({ success: false, message: 'Incident not found.' }); return; }
+    if (!(await canAccessIncident(req.user!, incident))) { res.status(403).json({ success: false, message: 'Forbidden.' }); return; }
+
+    const jurisdiction = await db.findAdministrativeJurisdiction(incident.latitude, incident.longitude);
+
+    await db.logAudit({
+      action: 'SECURITY_EVENT', module: 'security',
+      userId: req.user!.id, userEmail: req.user!.email, userRole: req.user!.role,
+      ipAddress: req.ip || '127.0.0.1',
+      details: `Incident ${incidentId} flagged for manual review (${reviewType}): ${reason.trim()}`,
+      metadata: { incidentId, reviewType, withinKnownBoundary: jurisdiction.withinKnownBoundary, jurisdiction }
+    });
+
+    res.json({
+      success: true,
+      message: 'Incident flagged for authorized manual review.',
+      data: { incidentId, reviewType, reason: reason.trim(), jurisdiction }
+    });
+  } catch (err: any) {
+    const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
+    res.status(400).json({ success: false, message: msg });
+  }
+});
+
 router.get('/:id', authenticate, requirePermission('incident.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const incident = await db.getIncidentById(req.params.id);
   if (!incident) { res.status(404).json({ success: false, message: `Incident ${req.params.id} not found.` }); return; }
@@ -248,6 +357,37 @@ router.post('/:id/assign', authenticate, requirePermission('incident.assign'), a
       }
       if (incident.assignedDepartmentId && incident.assignedDepartmentId !== req.user.departmentId) {
         res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
+      }
+    }
+
+    // Geographic jurisdiction validation: officer must be authorized for the incident's
+    // administrative location (state/district/sub-district/block/locality).
+    const assignee = await db.getUserById(officerId.trim());
+    if (!assignee) { res.status(404).json({ success: false, message: 'Assignee officer not found.' }); return; }
+    if (assignee.role !== 'officer') { res.status(400).json({ success: false, message: 'Assignments may only target field officers.' }); return; }
+
+    const jurisdiction = await db.findAdministrativeJurisdiction(incident.latitude, incident.longitude);
+    if (jurisdiction.withinKnownBoundary) {
+      const jStates = assignee.jurisdictionStateIds || [];
+      const jDistricts = assignee.jurisdictionDistrictIds || [];
+      const jSubDistricts = assignee.jurisdictionSubDistrictIds || [];
+      const jBlocks = assignee.jurisdictionBlockIds || [];
+      const jLocalities = assignee.jurisdictionLocalityIds || [];
+
+      const coversState = !jurisdiction.stateId || jStates.includes(jurisdiction.stateId);
+      const coversDistrict = !jurisdiction.districtId || jDistricts.includes(jurisdiction.districtId);
+      const coversSubDistrict = !jurisdiction.subDistrictId || jSubDistricts.includes(jurisdiction.subDistrictId);
+      const coversBlock = !jurisdiction.blockId || jBlocks.includes(jurisdiction.blockId);
+      const coversLocality = !jurisdiction.localityId || jLocalities.includes(jurisdiction.localityId);
+
+      const jurisdictionMatch = coversState && coversDistrict && coversSubDistrict && coversBlock && coversLocality;
+      if (!jurisdictionMatch) {
+        res.status(403).json({
+          success: false,
+          message: 'Forbidden: Officer geographic jurisdiction does not cover the incident location.',
+          errors: ['Geographic jurisdiction mismatch. Officer is not authorized for this administrative area.']
+        });
+        return;
       }
     }
 

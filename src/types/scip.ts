@@ -31,7 +31,16 @@ export type UserPermission =
   | 'audit.read'
   | 'model.evaluate'
   | 'data.export'
-  | 'admin.manage';
+  | 'admin.manage'
+  // India location & geospatial permissions
+  | 'location.read'
+  | 'location.manage'
+  | 'location.boundary.read'
+  | 'iplog.read'
+  | 'iplog.manage'
+  | 'geoanalytics.read'
+  | 'map.read'
+  | 'map.manage';
 
 export interface User {
   id: string;
@@ -45,6 +54,20 @@ export interface User {
   status: 'active' | 'suspended';
   sessionVersion?: number;
   credentialsResetRequired?: boolean;
+  // Residence location (separate from complaint locations)
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
+  pinCode?: string;
+  residenceAddress?: string;
+  // Officer geographic jurisdiction
+  jurisdictionStateIds?: string[];
+  jurisdictionDistrictIds?: string[];
+  jurisdictionSubDistrictIds?: string[];
+  jurisdictionBlockIds?: string[];
+  jurisdictionLocalityIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +123,19 @@ export interface Report {
   urgency: UrgencyLevel;
   incidentId?: string;
   images?: string[];
+  // India location context (additive, preserves existing records)
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
+  pinCode?: string;
+  locationSource?: LocationSource;
+  locationAccuracyMeters?: number;
+  locationConfirmedAt?: string;
+  // Complaint-specific address details (distinct from citizen residence)
+  address?: string;
+  landmark?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -176,6 +212,12 @@ export interface Incident {
   resolutionNotes?: string;
   resolvedAt?: string;
   evidence: string[];
+  // India location context (additive)
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -284,6 +326,8 @@ export type AuditAction =
   | 'LOGIN_SUCCESS'
   | 'LOGIN_FAILED'
   | 'LOGOUT'
+  | 'REGISTER'
+  | 'PRIVILEGED_MEMBER_REGISTERED'
   | 'USER_CREATED'
   | 'ROLE_CHANGED'
   | 'USER_STATUS_UPDATED'
@@ -334,6 +378,138 @@ export interface RiskScore {
   factors: RiskFactor[];
   explanation: string;
   computedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// India Administrative Location Hierarchy
+// India → State/UT → District → Sub-district/Tehsil/Taluk → Block → Village/Town/Urban Locality
+// Codes and names are stored separately; LGD-style identifiers preferred.
+// ---------------------------------------------------------------------------
+
+export type LocationLevel = 'state' | 'district' | 'sub_district' | 'block' | 'locality';
+
+export interface AdminState {
+  id: string;            // e.g. 'IN-ST-01' or LGD state code
+  code: string;          // official short code, e.g. 'MH', 'DL', 'KA'
+  name: string;          // e.g. 'Maharashtra', 'Delhi', 'Karnataka'
+  type: 'state' | 'union_territory';
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminDistrict {
+  id: string;
+  code: string;          // district code within state
+  name: string;
+  stateId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSubDistrict {
+  id: string;
+  code: string;
+  name: string;
+  districtId: string;
+  stateId: string;       // denormalized for fast filtering
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminBlock {
+  id: string;
+  code: string;
+  name: string;
+  subDistrictId: string;
+  districtId: string;
+  stateId: string;       // denormalized for fast filtering
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminLocality {
+  id: string;
+  code: string;
+  name: string;
+  blockId: string;
+  subDistrictId: string;
+  districtId: string;
+  stateId: string;       // denormalized for fast filtering
+  type: 'village' | 'town' | 'urban_locality' | 'city';
+  pinCode?: string;      // six-digit Indian PIN code, optional
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdministrativeBoundary {
+  id: string;
+  level: LocationLevel;
+  parentId: string | null;
+  geometry?: GeoJSON.Polygon | null;  // optional boundary polygon
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Complaint location (distinct from residence location)
+// ---------------------------------------------------------------------------
+
+export type LocationSource = 'gps' | 'manual_map' | 'geocoded' | 'preset';
+
+export interface ComplaintLocation {
+  latitude: number;
+  longitude: number;
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
+  address?: string;
+  landmark?: string;
+  pinCode?: string;
+  locationSource: LocationSource;
+  locationAccuracyMeters?: number;
+  locationConfirmedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// IP security audit logging
+// ---------------------------------------------------------------------------
+
+export type AuthEventType =
+  | 'LOGIN_SUCCESS'
+  | 'LOGIN_FAILED'
+  | 'LOGOUT'
+  | 'REGISTER'
+  | 'PASSWORD_CHANGED'
+  | 'PASSWORD_RESET_REQUESTED'
+  | 'SESSION_REVOKED'
+  | 'SUSPICIOUS_ACTIVITY'
+  | 'RATE_LIMIT_HIT'
+  | 'UNAUTHORIZED_ACCESS_ATTEMPT';
+
+export interface IPSecurityLog {
+  id: string;
+  ipAddress: string;          // redacted in ordinary app logs
+  timestamp: string;
+  userId?: string;
+  userEmail?: string;
+  userRole?: UserRole;
+  correlationId?: string;
+  method: string;
+  endpoint: string;
+  userAgent?: string;
+  eventType: AuthEventType;
+  success: boolean;
+  details?: string;
+  metadata?: Record<string, any>;
+  hash?: string;
+  prevHash?: string;
 }
 
 export interface SpatioTemporalCluster {
@@ -401,4 +577,15 @@ export const IncidentSeverity = {} as any;
 export const IncidentPriority = {} as any;
 export const IncidentStatus = {} as any;
 export const AuditAction = {} as any;
+export const LocationLevel = {} as any;
+export const LocationSource = {} as any;
+export const AuthEventType = {} as any;
+export const AdminState = {} as any;
+export const AdminDistrict = {} as any;
+export const AdminSubDistrict = {} as any;
+export const AdminBlock = {} as any;
+export const AdminLocality = {} as any;
+export const AdministrativeBoundary = {} as any;
+export const ComplaintLocation = {} as any;
+export const IPSecurityLog = {} as any;
 

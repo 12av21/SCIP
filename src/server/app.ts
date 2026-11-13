@@ -9,9 +9,13 @@ import incidentRoutes from './routes/incidentRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
 import adminRoutes from './routes/adminRoutes';
 import miscRoutes from './routes/miscRoutes';
+import locationRoutes from './routes/locationRoutes';
+import iplogRoutes from './routes/iplogRoutes';
+import geoanalyticsRoutes from './routes/geoanalyticsRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
 import { validateJwtConfigOnStartup } from './middleware/auth.js';
+import { logger } from './logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +31,13 @@ export async function createApp(options: CreateAppOptions = {}) {
   validateJwtConfigOnStartup();
 
   const app = express();
+
+  // Trust proxy configuration for production deployments behind reverse proxies/load balancers.
+  // Set SCIP_TRUST_PROXY=true only when behind a trusted proxy (e.g. Nginx, ALB).
+  // When enabled, Express trusts X-Forwarded-* headers for req.ip, req.ips, etc.
+  if (process.env.SCIP_TRUST_PROXY === 'true') {
+    app.set('trust proxy', true);
+  }
 
   // Initialize MongoDB connection lifecycle asynchronously if configured, then safely
   // evaluate explicit isolated runtime gates (no split-brain/default cutover).
@@ -64,31 +75,38 @@ export async function createApp(options: CreateAppOptions = {}) {
     next();
   });
 
-  // Basic in-memory rate limiting (best-effort, single-process; replace with shared store in multi-instance deployments)
+// Distributed-capable rate limiting (in-memory default; shared store opt-in for multi-instance)
+  const { createRateLimitStore, getRateLimitKey } = await import('./rateLimit.js');
+  const rateLimiter = createRateLimitStore();
   const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     if (process.env.DISABLE_RATE_LIMIT === 'true') {
       next();
       return;
     }
     const now = Date.now();
     const windowMs = 60_000;
-    // Opportunistic cleanup to bound memory in long-lived single-process runs.
-    if (rateBuckets.size > 5000) {
-      for (const [k, v] of rateBuckets) {
-        if (now > v.resetAt) rateBuckets.delete(k);
+    const isAuth = req.path.startsWith('/api/auth');
+    const limit = isAuth ? 60 : 300;
+    const key = getRateLimitKey(req);
+    let count: number;
+    try {
+      count = await rateLimiter.increment(key, windowMs);
+    } catch {
+      // Fallback to in-memory on store error
+      if (rateBuckets.size > 5000) {
+        for (const [k, v] of rateBuckets) { if (now > v.resetAt) rateBuckets.delete(k); }
+      }
+      const existing = rateBuckets.get(key);
+      if (!existing || now > existing.resetAt) {
+        rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+        count = 1;
+      } else {
+        existing.count += 1;
+        count = existing.count;
       }
     }
-    const limit = req.path.startsWith('/api/auth') ? 60 : 300;
-    const key = `${req.ip || 'unknown'}:${req.path.startsWith('/api/auth') ? 'auth' : 'api'}`;
-    const bucket = rateBuckets.get(key);
-    if (!bucket || now > bucket.resetAt) {
-      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-    bucket.count += 1;
-    if (bucket.count > limit) {
+    if (count > limit) {
       res.status(429).json({ success: false, message: 'Too many requests. Please try again later.' });
       return;
     }
@@ -104,6 +122,9 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use('/api/incidents', incidentRoutes);
   app.use('/api/intelligence', intelligenceRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/locations', locationRoutes);
+  app.use('/api/iplogs', iplogRoutes);
+  app.use('/api/geoanalytics', geoanalyticsRoutes);
   app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)
@@ -171,9 +192,9 @@ export async function startServer() {
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     if (process.env.NODE_ENV === 'production') {
-      console.log(`[SCIP] Server running on port ${PORT}`);
+      logger.info(`[SCIP] Server running on port ${PORT}`);
     } else {
-      console.log(`[SCIP] Smart Community Intelligence Platform server running on http://0.0.0.0:${PORT}`);
+      logger.info(`[SCIP] Smart Community Intelligence Platform server running on http://0.0.0.0:${PORT}`);
     }
   });
 
@@ -182,7 +203,7 @@ export async function startServer() {
     if (shuttingDown) return;
     shuttingDown = true;
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`[SCIP] Received ${signal}. Shutting down gracefully...`);
+      logger.info(`[SCIP] Received ${signal}. Shutting down gracefully...`);
     }
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

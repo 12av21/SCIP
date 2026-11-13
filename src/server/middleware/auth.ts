@@ -3,7 +3,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { db } from '../../database/index.js';
-import { User, UserPermission, UserRole } from '../../types/scip.ts';
+import { User, UserPermission, UserRole, AuthEventType } from '../../types/scip.ts';
 
 const MIN_JWT_SECRET_LENGTH = 32;
 let cachedSecret: string | null = null;
@@ -37,7 +37,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'report.read',
     'report.update',
     'incident.read',
-    'feedback.create'
+    'feedback.create',
+    'location.read',
+    'map.read'
   ],
   officer: [
     // Field Officer
@@ -45,7 +47,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'incident.read',
     'incident.update',
     'inspection.create',
-    'inspection.read'
+    'inspection.read',
+    'location.read',
+    'map.read'
   ],
   dept_officer: [
     // Department Desk Officer
@@ -61,7 +65,10 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'inspection.verify',
     'inspection.read',
     'analytics.read',
-    'data.export'
+    'data.export',
+    'location.read',
+    'map.read',
+    'geoanalytics.read'
   ],
   analyst: [
     // Data & AI Analyst
@@ -70,7 +77,10 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'analytics.read',
     'intelligence.read',
     'model.evaluate',
-    'data.export'
+    'data.export',
+    'location.read',
+    'map.read',
+    'geoanalytics.read'
   ],
   authority: [
     // Authority Director
@@ -88,7 +98,11 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'analytics.read',
     'intelligence.read',
     'audit.read',
-    'data.export'
+    'data.export',
+    'location.read',
+    'location.boundary.read',
+    'map.read',
+    'geoanalytics.read'
   ],
   admin: [
     // Super Administrator
@@ -116,7 +130,15 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'audit.read',
     'model.evaluate',
     'data.export',
-    'admin.manage'
+    'admin.manage',
+    'location.read',
+    'location.manage',
+    'location.boundary.read',
+    'iplog.read',
+    'iplog.manage',
+    'map.read',
+    'map.manage',
+    'geoanalytics.read'
   ]
 };
 
@@ -133,6 +155,10 @@ export const AuthenticatedRequest = {} as any;
 export async function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_FAILED', success: false,
+      details: 'Missing or malformed Authorization header'
+    });
     res.status(401).json({
       success: false,
       message: 'Authentication token required.',
@@ -147,6 +173,11 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
     const user = await db.getUserById(decoded.id);
 
     if (!user) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        userId: decoded.id, userEmail: decoded.email,
+        details: 'User no longer exists or session is invalid'
+      });
       res.status(401).json({
         success: false,
         message: 'User no longer exists or session is invalid.',
@@ -156,6 +187,11 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
     }
 
     if (user.status === 'suspended') {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        userId: user.id, userEmail: user.email, userRole: user.role,
+        details: 'Account suspended'
+      });
       res.status(403).json({
         success: false,
         message: 'Your account has been suspended by system administrators.',
@@ -164,8 +200,12 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
       return;
     }
 
-    // Revalidate session version for sensitive revocation (password change/logout-all/admin action).
     if (typeof decoded.sv === 'number' && typeof user.sessionVersion === 'number' && decoded.sv !== user.sessionVersion) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        userId: user.id, userEmail: user.email, userRole: user.role,
+        details: 'Session revoked'
+      });
       res.status(401).json({
         success: false,
         message: 'Session is no longer valid. Please sign in again.',
@@ -175,6 +215,11 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
     }
 
     if (user.credentialsResetRequired) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        userId: user.id, userEmail: user.email, userRole: user.role,
+        details: 'Credential reset required'
+      });
       res.status(403).json({
         success: false,
         message: 'Credential reset required before accessing protected resources.',
@@ -183,9 +228,20 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
       return;
     }
 
+    // Successful authentication
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_SUCCESS', success: true,
+      userId: user.id, userEmail: user.email, userRole: user.role,
+      details: 'User authenticated successfully'
+    });
+
     req.user = user;
     next();
   } catch (err: any) {
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_FAILED', success: false,
+      details: 'Invalid or expired authentication session'
+    });
     res.status(401).json({
       success: false,
       message: 'Invalid or expired authentication session.',
@@ -242,4 +298,37 @@ export function requireRole(allowedRoles: UserRole[]) {
 
     next();
   };
+}
+
+/**
+ * Log an IP security event to the append-only IP security log.
+ * Safe to call even if IPSecurityLog storage is unavailable (swallows errors).
+ */
+export async function logIpSecurityEvent(params: {
+  req: AuthenticatedRequest;
+  eventType: AuthEventType;
+  success: boolean;
+  userId?: string;
+  userEmail?: string;
+  userRole?: UserRole;
+  details?: string;
+  correlationId?: string;
+}): Promise<void> {
+  try {
+    await db.createIPSecurityLog({
+      ipAddress: params.req.ip || '127.0.0.1',
+      userId: params.userId,
+      userEmail: params.userEmail,
+      userRole: params.userRole,
+      correlationId: params.correlationId,
+      method: params.req.method,
+      endpoint: params.req.originalUrl || params.req.url,
+      userAgent: params.req.headers['user-agent'],
+      eventType: params.eventType,
+      success: params.success,
+      details: params.details
+    });
+  } catch {
+    // IP logging must never break the request flow
+  }
 }

@@ -3,7 +3,7 @@
 import { Router, Response } from 'express';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
-import { Report, ReportCategory, ReportStatus, UrgencyLevel } from '../../types/scip.js';
+import { Report, ReportCategory, ReportStatus, UrgencyLevel, LocationSource } from '../../types/scip.js';
 
 const router = Router();
 
@@ -51,6 +51,17 @@ function pickCitizenUpdates(body: any): Partial<Report> {
   const lng = Number(body.longitude);
   if (Number.isFinite(lat) && lat >= -90 && lat <= 90) out.latitude = lat;
   if (Number.isFinite(lng) && lng >= -180 && lng <= 180) out.longitude = lng;
+  if (typeof body.address === 'string') out.address = body.address.trim().slice(0, 500);
+  if (typeof body.landmark === 'string') out.landmark = body.landmark.trim().slice(0, 200);
+  if (typeof body.pinCode === 'string' && /^[1-9][0-9]{5}$/.test(body.pinCode)) out.pinCode = body.pinCode;
+  if (['gps', 'manual_map', 'geocoded', 'preset'].includes(body.locationSource)) out.locationSource = body.locationSource;
+  const acc = Number(body.locationAccuracyMeters);
+  if (Number.isFinite(acc) && acc >= 0 && acc <= 1000000) out.locationAccuracyMeters = acc;
+  if (typeof body.stateId === 'string') out.stateId = body.stateId;
+  if (typeof body.districtId === 'string') out.districtId = body.districtId;
+  if (typeof body.subDistrictId === 'string') out.subDistrictId = body.subDistrictId;
+  if (typeof body.blockId === 'string') out.blockId = body.blockId;
+  if (typeof body.localityId === 'string') out.localityId = body.localityId;
   if (Array.isArray(body.images)) {
     out.images = body.images.filter((x: any) => typeof x === 'string').slice(0, 10);
   }
@@ -137,7 +148,18 @@ router.post(
         latitude,
         longitude,
         urgency = 'medium',
-        images
+        images,
+        // Complaint location fields (additive, distinct from citizen residence)
+        stateId,
+        districtId,
+        subDistrictId,
+        blockId,
+        localityId,
+        address,
+        landmark,
+        pinCode,
+        locationSource = 'manual_map',
+        locationAccuracyMeters
       } = req.body || {};
 
       if (typeof title !== 'string' || typeof description !== 'string' || typeof locationName !== 'string') {
@@ -175,8 +197,55 @@ router.post(
         res.status(400).json({ success: false, message: 'Invalid urgency level.', errors: ['Invalid urgency.'] });
         return;
       }
+
+      // Validate complaint location fields
+      const validLocationSource = ['gps', 'manual_map', 'geocoded', 'preset'].includes(locationSource) ? locationSource : 'manual_map';
+      let safeAccuracyMeters: number | undefined;
+      if (locationAccuracyMeters !== undefined && locationAccuracyMeters !== null && locationAccuracyMeters !== '') {
+        const acc = Number(locationAccuracyMeters);
+        if (!Number.isFinite(acc) || acc < 0 || acc > 1000000) {
+          res.status(400).json({ success: false, message: 'Location accuracy must be a non-negative number in metres.', errors: ['Invalid location accuracy.'] });
+          return;
+        }
+        safeAccuracyMeters = acc;
+      }
+      let safePinCode: string | undefined;
+      if (pinCode !== undefined && pinCode !== null && pinCode !== '') {
+        if (typeof pinCode !== 'string' || !/^[1-9][0-9]{5}$/.test(pinCode)) {
+          res.status(400).json({ success: false, message: 'PIN code must be a six-digit Indian PIN code.', errors: ['Invalid PIN code.'] });
+          return;
+        }
+        safePinCode = pinCode;
+      }
+
+      // Validate administrative references exist if provided
+      if (stateId && typeof stateId === 'string' && !db.getAdminStateById(stateId)) {
+        res.status(400).json({ success: false, message: 'Invalid stateId.', errors: ['Invalid administrative state.'] });
+        return;
+      }
+      if (districtId && typeof districtId === 'string' && !db.getAdminDistrictById(districtId)) {
+        res.status(400).json({ success: false, message: 'Invalid districtId.', errors: ['Invalid administrative district.'] });
+        return;
+      }
+      if (subDistrictId && typeof subDistrictId === 'string' && !db.getAdminSubDistrictById(subDistrictId)) {
+        res.status(400).json({ success: false, message: 'Invalid subDistrictId.', errors: ['Invalid administrative sub-district.'] });
+        return;
+      }
+      if (blockId && typeof blockId === 'string' && !db.getAdminBlockById(blockId)) {
+        res.status(400).json({ success: false, message: 'Invalid blockId.', errors: ['Invalid administrative block.'] });
+        return;
+      }
+      if (localityId && typeof localityId === 'string' && !db.getAdminLocalityById(localityId)) {
+        res.status(400).json({ success: false, message: 'Invalid localityId.', errors: ['Invalid administrative locality.'] });
+        return;
+      }
+
       const safeSubcategory = typeof subcategory === 'string' ? subcategory.trim().slice(0, 120) : undefined;
       const safeImages = Array.isArray(images) ? images.filter((x: any) => typeof x === 'string' && x.length < 2048).slice(0, 10) : [];
+      const safeAddress = typeof address === 'string' ? address.trim().slice(0, 500) : undefined;
+      const safeLandmark = typeof landmark === 'string' ? landmark.trim().slice(0, 200) : undefined;
+      const safeLocationName = typeof locationName === 'string' ? locationName.trim() : '';
+      const now = new Date().toISOString();
 
       const user = req.user!;
       const { report, analysis } = await db.createReport({
@@ -184,14 +253,25 @@ router.post(
         description: safeDescription,
         category,
         subcategory: safeSubcategory,
-        locationName: safeLocation,
+        locationName: safeLocationName,
         latitude: validLat,
         longitude: validLng,
         citizenId: user.id,
         citizenName: user.name,
         citizenEmail: user.email,
         urgency,
-        images: safeImages
+        images: safeImages,
+        stateId: typeof stateId === 'string' ? stateId : undefined,
+        districtId: typeof districtId === 'string' ? districtId : undefined,
+        subDistrictId: typeof subDistrictId === 'string' ? subDistrictId : undefined,
+        blockId: typeof blockId === 'string' ? blockId : undefined,
+        localityId: typeof localityId === 'string' ? localityId : undefined,
+        pinCode: safePinCode,
+        locationSource: validLocationSource as LocationSource,
+        locationAccuracyMeters: safeAccuracyMeters,
+        locationConfirmedAt: now,
+        address: safeAddress,
+        landmark: safeLandmark
       });
 
       res.status(201).json({

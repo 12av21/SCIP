@@ -119,6 +119,7 @@ export const db: IScipRepository = {
   markCredentialsResetRequired: delegate('markCredentialsResetRequired'),
   changeUserPassword: delegate('changeUserPassword'),
   updateUserProfile: delegate('updateUserProfile'),
+  deleteUser: delegate('deleteUser'),
   getDepartments: delegate('getDepartments'),
   getDepartmentById: delegate('getDepartmentById'),
   getReports: delegate('getReports'),
@@ -147,6 +148,55 @@ export const db: IScipRepository = {
   escalateIncident: delegate('escalateIncident'),
   evaluateClassifier: delegate('evaluateClassifier'),
   getDatasetQuality: delegate('getDatasetQuality'),
+
+  // --- India Administrative Locations ---
+  getAdminStates: delegate('getAdminStates'),
+  getAdminStateById: delegate('getAdminStateById'),
+  createAdminState: delegate('createAdminState'),
+  updateAdminState: delegate('updateAdminState'),
+  deleteAdminState: delegate('deleteAdminState'),
+  getAdminDistricts: delegate('getAdminDistricts'),
+  getAdminDistrictById: delegate('getAdminDistrictById'),
+  createAdminDistrict: delegate('createAdminDistrict'),
+  updateAdminDistrict: delegate('updateAdminDistrict'),
+  deleteAdminDistrict: delegate('deleteAdminDistrict'),
+  getAdminSubDistricts: delegate('getAdminSubDistricts'),
+  getAdminSubDistrictById: delegate('getAdminSubDistrictById'),
+  createAdminSubDistrict: delegate('createAdminSubDistrict'),
+  updateAdminSubDistrict: delegate('updateAdminSubDistrict'),
+  deleteAdminSubDistrict: delegate('deleteAdminSubDistrict'),
+  getAdminBlocks: delegate('getAdminBlocks'),
+  getAdminBlockById: delegate('getAdminBlockById'),
+  createAdminBlock: delegate('createAdminBlock'),
+  updateAdminBlock: delegate('updateAdminBlock'),
+  deleteAdminBlock: delegate('deleteAdminBlock'),
+  getAdminLocalities: delegate('getAdminLocalities'),
+  getAdminLocalityById: delegate('getAdminLocalityById'),
+  createAdminLocality: delegate('createAdminLocality'),
+  updateAdminLocality: delegate('updateAdminLocality'),
+  deleteAdminLocality: delegate('deleteAdminLocality'),
+  getAdministrativeBoundaries: delegate('getAdministrativeBoundaries'),
+  getAdministrativeBoundaryById: delegate('getAdministrativeBoundaryById'),
+  createAdministrativeBoundary: delegate('createAdministrativeBoundary'),
+  updateAdministrativeBoundary: delegate('updateAdministrativeBoundary'),
+  deleteAdministrativeBoundary: delegate('deleteAdministrativeBoundary'),
+
+  // --- IP Security Logs ---
+  createIPSecurityLog: delegate('createIPSecurityLog'),
+  getIPSecurityLogs: delegate('getIPSecurityLogs'),
+  getIPSecurityLogById: delegate('getIPSecurityLogById'),
+  deleteIPSecurityLogsOlderThan: delegate('deleteIPSecurityLogsOlderThan'),
+
+  // --- Geographic Jurisdiction & Assignment ---
+  findAdministrativeJurisdiction: delegate('findAdministrativeJurisdiction'),
+  getOfficersByJurisdiction: delegate('getOfficersByJurisdiction'),
+  updateUserJurisdiction: delegate('updateUserJurisdiction'),
+
+  // --- Backup / Restore ---
+  createBackup: delegate('createBackup'),
+  listBackups: delegate('listBackups'),
+  pruneBackups: delegate('pruneBackups'),
+  restoreFromBackup: delegate('restoreFromBackup'),
 } as IScipRepository;
 
 export const REQUESTED_DATABASE_DRIVER: DatabaseDriverSelection = requestedDriver;

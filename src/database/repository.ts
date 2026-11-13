@@ -3,9 +3,12 @@
  * Async-capable interface to support both JSON-backed and future MongoDB-backed implementations.
  * JSON implementation preserves existing runtime behavior; Mongo implementation must reach parity before cutover.
  */
+import { SCIPDatabase } from './scipDatabase.js';
 import type {
   User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster,
-  Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics
+  Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics,
+  AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality,
+  AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel
 } from '../types/scip.js';
 
 export interface IScipRepository {
@@ -31,6 +34,7 @@ export interface IScipRepository {
   markCredentialsResetRequired(userId: string): Promise<void> | void;
   changeUserPassword(userId: string, newPasswordHash: string): Promise<void> | void;
   updateUserProfile(userId: string, updates: { name?: string; phone?: string }): Promise<User> | User;
+  deleteUser(userId: string, requestingUser: User): Promise<User> | User;
 
   // departments
   getDepartments(): Promise<Department[]> | Department[];
@@ -73,4 +77,80 @@ export interface IScipRepository {
   // analytics
   evaluateClassifier(): Promise<ModelEvaluationMetrics> | ModelEvaluationMetrics;
   getDatasetQuality(): Promise<any> | any;
+
+  // --- India Administrative Locations ---
+  getAdminStates(filters?: { isActive?: boolean; type?: 'state' | 'union_territory' }): Promise<AdminState[]> | AdminState[];
+  getAdminStateById(id: string): Promise<AdminState | undefined> | AdminState | undefined;
+  createAdminState(data: Omit<AdminState, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdminState> | AdminState;
+  updateAdminState(id: string, updates: Partial<AdminState>, adminUser: User): Promise<AdminState> | AdminState;
+  deleteAdminState(id: string, adminUser: User): Promise<void>;
+
+  getAdminDistricts(filters?: { stateId?: string; isActive?: boolean }): Promise<AdminDistrict[]> | AdminDistrict[];
+  getAdminDistrictById(id: string): Promise<AdminDistrict | undefined> | AdminDistrict | undefined;
+  createAdminDistrict(data: Omit<AdminDistrict, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdminDistrict> | AdminDistrict;
+  updateAdminDistrict(id: string, updates: Partial<AdminDistrict>, adminUser: User): Promise<AdminDistrict> | AdminDistrict;
+  deleteAdminDistrict(id: string, adminUser: User): Promise<void>;
+
+  getAdminSubDistricts(filters?: { districtId?: string; stateId?: string; isActive?: boolean }): Promise<AdminSubDistrict[]> | AdminSubDistrict[];
+  getAdminSubDistrictById(id: string): Promise<AdminSubDistrict | undefined> | AdminSubDistrict | undefined;
+  createAdminSubDistrict(data: Omit<AdminSubDistrict, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdminSubDistrict> | AdminSubDistrict;
+  updateAdminSubDistrict(id: string, updates: Partial<AdminSubDistrict>, adminUser: User): Promise<AdminSubDistrict> | AdminSubDistrict;
+  deleteAdminSubDistrict(id: string, adminUser: User): Promise<void>;
+
+  getAdminBlocks(filters?: { subDistrictId?: string; districtId?: string; stateId?: string; isActive?: boolean }): Promise<AdminBlock[]> | AdminBlock[];
+  getAdminBlockById(id: string): Promise<AdminBlock | undefined> | AdminBlock | undefined;
+  createAdminBlock(data: Omit<AdminBlock, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdminBlock> | AdminBlock;
+  updateAdminBlock(id: string, updates: Partial<AdminBlock>, adminUser: User): Promise<AdminBlock> | AdminBlock;
+  deleteAdminBlock(id: string, adminUser: User): Promise<void>;
+
+  getAdminLocalities(filters?: { blockId?: string; subDistrictId?: string; districtId?: string; stateId?: string; type?: 'village' | 'town' | 'urban_locality' | 'city'; isActive?: boolean }): Promise<AdminLocality[]> | AdminLocality[];
+  getAdminLocalityById(id: string): Promise<AdminLocality | undefined> | AdminLocality | undefined;
+  createAdminLocality(data: Omit<AdminLocality, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdminLocality> | AdminLocality;
+  updateAdminLocality(id: string, updates: Partial<AdminLocality>, adminUser: User): Promise<AdminLocality> | AdminLocality;
+  deleteAdminLocality(id: string, adminUser: User): Promise<void>;
+
+  getAdministrativeBoundaries(filters?: { level?: LocationLevel; parentId?: string | null }): Promise<AdministrativeBoundary[]> | AdministrativeBoundary[];
+  getAdministrativeBoundaryById(id: string): Promise<AdministrativeBoundary | undefined> | AdministrativeBoundary | undefined;
+  createAdministrativeBoundary(data: Omit<AdministrativeBoundary, 'id' | 'createdAt' | 'updatedAt'>, adminUser: User): Promise<AdministrativeBoundary> | AdministrativeBoundary;
+  updateAdministrativeBoundary(id: string, updates: Partial<AdministrativeBoundary>, adminUser: User): Promise<AdministrativeBoundary> | AdministrativeBoundary;
+  deleteAdministrativeBoundary(id: string, adminUser: User): Promise<void>;
+
+  // --- IP Security Logs ---
+  createIPSecurityLog(log: Omit<IPSecurityLog, 'id' | 'timestamp' | 'hash' | 'prevHash'>): Promise<IPSecurityLog> | IPSecurityLog;
+  getIPSecurityLogs(filters?: { userId?: string; eventType?: AuthEventType; success?: boolean; ipAddress?: string; limit?: number }): Promise<IPSecurityLog[]> | IPSecurityLog[];
+  getIPSecurityLogById(id: string): Promise<IPSecurityLog | undefined> | IPSecurityLog | undefined;
+  deleteIPSecurityLogsOlderThan(days: number, adminUser: User): Promise<number>;
+
+  // --- Geographic Jurisdiction & Assignment ---
+  findAdministrativeJurisdiction(latitude: number, longitude: number): Promise<{
+    stateId?: string; stateName?: string;
+    districtId?: string; districtName?: string;
+    subDistrictId?: string; subDistrictName?: string;
+    blockId?: string; blockName?: string;
+    localityId?: string; localityName?: string;
+    withinKnownBoundary: boolean;
+    boundaryLevel?: LocationLevel;
+  }> | {
+    stateId?: string; stateName?: string;
+    districtId?: string; districtName?: string;
+    subDistrictId?: string; subDistrictName?: string;
+    blockId?: string; blockName?: string;
+    localityId?: string; localityName?: string;
+    withinKnownBoundary: boolean;
+    boundaryLevel?: LocationLevel;
+  };
+  getOfficersByJurisdiction(filters: {
+    stateId?: string; districtId?: string; subDistrictId?: string;
+    blockId?: string; localityId?: string; departmentId?: string;
+  }): Promise<User[]> | User[];
+  updateUserJurisdiction(userId: string, jurisdiction: {
+    stateIds?: string[]; districtIds?: string[]; subDistrictIds?: string[];
+    blockIds?: string[]; localityIds?: string[]; departmentId?: string;
+  }, adminUser: User): Promise<User> | User;
+
+  // --- Backup / Restore ---
+  createBackup(backupDir?: string): { backupFile: string; recordCount: number; savedAt: string } | Promise<{ backupFile: string; recordCount: number; savedAt: string }>;
+  listBackups(backupDir?: string): { file: string; name: string; size: number; savedAt: string | null; recordCount: number }[] | Promise<{ file: string; name: string; size: number; savedAt: string | null; recordCount: number }[]>;
+  pruneBackups(retentionCount: number, backupDir?: string): { pruned: number; remaining: number } | Promise<{ pruned: number; remaining: number }>;
+  restoreFromBackup(backupFile: string, storageFile?: string): SCIPDatabase | Promise<SCIPDatabase>;
 }
