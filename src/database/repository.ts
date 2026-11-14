@@ -44,6 +44,7 @@ export interface IScipRepository {
   getReports(filter?: { citizenId?: string; status?: string; category?: string; urgency?: string; incidentId?: string }): Promise<Report[]> | Report[];
   getReportById(id: string): Promise<Report | undefined> | Report | undefined;
   getAIAnalysisForReport(reportId: string): Promise<AIAnalysis | undefined> | AIAnalysis | undefined;
+  updateAIAnalysis(reportId: string, updates: Partial<AIAnalysis>): Promise<AIAnalysis> | AIAnalysis;
   createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<{ report: Report; analysis: AIAnalysis }> | { report: Report; analysis: AIAnalysis };
   updateReport(id: string, updates: Partial<Report>, user: User): Promise<Report> | Report;
   withdrawReport(id: string, user: User): Promise<Report> | Report;
@@ -77,6 +78,10 @@ export interface IScipRepository {
   // analytics
   evaluateClassifier(): Promise<ModelEvaluationMetrics> | ModelEvaluationMetrics;
   getDatasetQuality(): Promise<any> | any;
+
+  // --- Database Storage & Integrity (Phase 7) ---
+  getStorageInfo(): Promise<any> | any;
+  validateDataIntegrity(): Promise<any> | any;
 
   // --- India Administrative Locations ---
   getAdminStates(filters?: { isActive?: boolean; type?: 'state' | 'union_territory' }): Promise<AdminState[]> | AdminState[];

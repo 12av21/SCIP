@@ -148,6 +148,8 @@ export const db: IScipRepository = {
   escalateIncident: delegate('escalateIncident'),
   evaluateClassifier: delegate('evaluateClassifier'),
   getDatasetQuality: delegate('getDatasetQuality'),
+  getStorageInfo: delegate('getStorageInfo'),
+  validateDataIntegrity: delegate('validateDataIntegrity'),
 
   // --- India Administrative Locations ---
   getAdminStates: delegate('getAdminStates'),

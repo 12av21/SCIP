@@ -36,7 +36,7 @@ const CATEGORY_PROFILES: CategoryProfile[] = [
       'smell', 'odor', 'stench', 'debris', 'carcass', 'sanitary', 'cleanliness',
       'sweeping', 'overflowing', 'rotting', 'plastic', 'refuse'
     ],
-    weight: 1.0
+    weight: 2.5
   },
   {
     category: 'Power & Lighting',
@@ -211,7 +211,7 @@ export function extractEntities(text: string): {
 export function determineSeverity(text: string, urgencyDeclared?: UrgencyLevel): UrgencyLevel {
   const lower = text.toLowerCase();
 
-  const criticalKeywords = ['live wire', 'collapse', 'sparking', 'gas leak', 'major flood', 'electrocution', 'severe injury', 'blocked ambulance'];
+  const criticalKeywords = ['live wire', 'collapse', 'sparking', 'gas leak', 'gas smell', 'major flood', 'electrocution', 'severe injury', 'blocked ambulance'];
   const highKeywords = ['flooded road', 'submerged', 'stalled vehicle', 'open manhole', 'burst pipe', 'overflowing sewage', 'heavy congestion', 'fallen tree blocking'];
   const mediumKeywords = ['pothole', 'broken light', 'garbage piled', 'water logging', 'slow traffic', 'foul smell'];
 

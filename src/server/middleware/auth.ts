@@ -39,7 +39,8 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'incident.read',
     'feedback.create',
     'location.read',
-    'map.read'
+    'map.read',
+    'image.upload'
   ],
   officer: [
     // Field Officer
@@ -49,7 +50,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'inspection.create',
     'inspection.read',
     'location.read',
-    'map.read'
+    'map.read',
+    'image.read',
+    'image.upload'
   ],
   dept_officer: [
     // Department Desk Officer
@@ -68,7 +71,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'data.export',
     'location.read',
     'map.read',
-    'geoanalytics.read'
+    'geoanalytics.read',
+    'image.read',
+    'image.upload'
   ],
   analyst: [
     // Data & AI Analyst
@@ -80,7 +85,8 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'data.export',
     'location.read',
     'map.read',
-    'geoanalytics.read'
+    'geoanalytics.read',
+    'image.read'
   ],
   authority: [
     // Authority Director
@@ -102,7 +108,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'location.read',
     'location.boundary.read',
     'map.read',
-    'geoanalytics.read'
+    'geoanalytics.read',
+    'image.read',
+    'image.upload'
   ],
   admin: [
     // Super Administrator
@@ -138,7 +146,9 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'iplog.manage',
     'map.read',
     'map.manage',
-    'geoanalytics.read'
+    'geoanalytics.read',
+    'image.read',
+    'image.upload'
   ]
 };
 

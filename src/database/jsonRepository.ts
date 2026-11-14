@@ -42,6 +42,7 @@ export class JsonScipRepository implements IScipRepository {
   getReports(filter?: { citizenId?: string; status?: string; category?: string; urgency?: string; incidentId?: string }) { return this.engine.getReports(filter as any); }
   getReportById(id: string) { return this.engine.getReportById(id); }
   getAIAnalysisForReport(reportId: string) { return this.engine.getAIAnalysisForReport(reportId); }
+  updateAIAnalysis(reportId: string, updates: Partial<AIAnalysis>) { return this.engine.updateAIAnalysis(reportId, updates); }
   createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>) { return this.engine.createReport(reportInput); }
   updateReport(id: string, updates: Partial<Report>, user: User) { return this.engine.updateReport(id, updates, user); }
   withdrawReport(id: string, user: User) { return this.engine.withdrawReport(id, user); }
@@ -70,6 +71,9 @@ export class JsonScipRepository implements IScipRepository {
 
   evaluateClassifier() { return this.engine.evaluateClassifier(); }
   getDatasetQuality() { return this.engine.getDatasetQuality(); }
+
+  getStorageInfo() { return this.engine.getStorageInfo(); }
+  validateDataIntegrity() { return this.engine.validateDataIntegrity(); }
 
   // --- India Administrative Locations ---
   getAdminStates(filters?: { isActive?: boolean; type?: 'state' | 'union_territory' }) { return this.engine.getAdminStates(filters); }

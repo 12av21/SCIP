@@ -12,6 +12,10 @@ import miscRoutes from './routes/miscRoutes';
 import locationRoutes from './routes/locationRoutes';
 import iplogRoutes from './routes/iplogRoutes';
 import geoanalyticsRoutes from './routes/geoanalyticsRoutes';
+import mapRoutes from './routes/mapRoutes';
+import imageRoutes from './routes/imageRoutes';
+import databaseRoutes from './routes/databaseRoutes';
+import indiaCivicRoutes from './routes/indiaCivicRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
 import { validateJwtConfigOnStartup } from './middleware/auth.js';
@@ -125,7 +129,11 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use('/api/locations', locationRoutes);
   app.use('/api/iplogs', iplogRoutes);
   app.use('/api/geoanalytics', geoanalyticsRoutes);
-  app.use('/api', miscRoutes);
+  app.use('/api/map', mapRoutes);
+  app.use('/api/image', imageRoutes);
+app.use('/api/india', indiaCivicRoutes);
+app.use('/api/database', databaseRoutes);
+app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)
   app.use('/api', (req, res) => {

@@ -3,7 +3,8 @@
 import { Router, Response } from 'express';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
-import { Report, ReportCategory, ReportStatus, UrgencyLevel, LocationSource } from '../../types/scip.js';
+import { Report, ReportCategory, ReportStatus, UrgencyLevel, LocationSource, ImageAnalysis } from '../../types/scip.js';
+import { processImageUpload, parseDataUrl, analyzeImage, extractImageMetadata } from '../../ai/imageIntelligence.js';
 
 const router = Router();
 
@@ -274,10 +275,47 @@ router.post(
         landmark: safeLandmark
       });
 
+      // --- Image Intelligence Integration (Phase 5) ---
+      // Analyze each attached image via the AI pipeline (local heuristic + Python service OCR/vision).
+      const imageEvidence: string[] = [];
+      const imageAnalyses: ImageAnalysis[] = [];
+      for (const imageDataUrl of safeImages) {
+        try {
+          const parsed = parseDataUrl(imageDataUrl);
+          if (!parsed) continue;
+          const meta = extractImageMetadata(parsed.buffer, 'upload', user.id);
+          if (parsed.mimeType && parsed.mimeType !== 'application/octet-stream') {
+            meta.mimeType = parsed.mimeType;
+          }
+          const analysis = await analyzeImage(parsed.buffer, meta, `${safeTitle}: ${safeDescription}`);
+          imageAnalyses.push(analysis);
+          const obs: string[] = [];
+          if (analysis.ocrText) obs.push(`OCR: "${analysis.ocrText}"`);
+          if (analysis.detectedObjects.length) obs.push(`Objects: ${analysis.detectedObjects.join(', ')}`);
+          if (analysis.sceneLabels.length) obs.push(`Scene: ${analysis.sceneLabels.join(', ')}`);
+          if (analysis.hasDamage) obs.push('Damage indicators detected');
+          if (obs.length) imageEvidence.push(`Image ${meta.imageId}: ${obs.join('; ')}`);
+        } catch {
+          // Image analysis is additive; do not fail report creation if image processing fails
+        }
+      }
+
+      // Merge image observations into the stored AI analysis
+      if (imageEvidence.length) {
+        try {
+          const updatedAnalysis = await db.updateAIAnalysis(report.id, {
+            evidence: [...analysis.evidence, ...imageEvidence]
+          });
+          analysis.evidence = updatedAnalysis.evidence;
+        } catch {
+          // Non-fatal; analysis already stored without image evidence
+        }
+      }
+
       res.status(201).json({
         success: true,
         message: 'Report submitted and processed by SCIP intelligence pipeline.',
-        data: { report, analysis }
+        data: { report, analysis, imageAnalyses }
       });
     } catch (err: any) {
       res.status(500).json({

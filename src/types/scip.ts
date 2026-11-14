@@ -40,7 +40,10 @@ export type UserPermission =
   | 'iplog.manage'
   | 'geoanalytics.read'
   | 'map.read'
-  | 'map.manage';
+  | 'map.manage'
+  // Image intelligence permissions
+  | 'image.read'
+  | 'image.upload';
 
 export interface User {
   id: string;
@@ -172,6 +175,7 @@ export interface AIAnalysis {
   evidence: string[];
   uncertaintyNotes?: string;
   confidence: number;
+  modelUsed: string;
   processedAt: string;
 }
 
@@ -286,6 +290,206 @@ export interface ModelEvaluationMetrics {
   sufficiencyStatus?: 'production_verified' | 'insufficient_sample_size';
   limitationsWarning?: string;
   splitRatio?: string;
+}
+
+// ---------------------------------------------------------------------------
+// AI Model Registry Types (Phase 2)
+// Tracks model versions, performance metrics, and active model selection
+// for the SCIP AI pipeline. Supports both local TypeScript TF-IDF models
+// and Python sentence-transformers embedding models.
+// ---------------------------------------------------------------------------
+
+export type ModelFramework = 'tfidf-ts' | 'sentence-transformers' | 'sklearn';
+export type ModelTask = 'classification' | 'embedding' | 'duplicate-detection' | 'entity-extraction' | 'risk-scoring';
+export type ModelStatus = 'candidate' | 'staging' | 'production' | 'deprecated' | 'retired';
+
+export interface ModelPerformance {
+  task: ModelTask;
+  accuracy?: number;
+  precision?: number;
+  recall?: number;
+  f1Score?: number;
+  sampleCount: number;
+  evaluatedAt: string;
+  inferenceLatencyMs?: number;
+  perCategoryMetrics?: {
+    category: ReportCategory;
+    precision: number;
+    recall: number;
+    f1: number;
+    sampleCount: number;
+  }[];
+  notes?: string;
+}
+
+export interface ModelVersion {
+  version: string;           // semver, e.g. '1.0.0', '2.1.0-embed'
+  framework: ModelFramework;
+  task: ModelTask;
+  modelId?: string;          // sentence-transformers model ID, e.g. 'all-MiniLM-L6-v2'
+  status: ModelStatus;
+  performance: ModelPerformance[];
+  createdAt: string;
+  createdBy: string;
+  checksum?: string;         // model file / weights hash
+  config?: Record<string, any>;
+  isDefault: boolean;
+}
+
+export interface ModelRegistryEntry {
+  name: string;              // e.g. 'scip-classifier', 'scip-embedder'
+  displayName: string;
+  description: string;
+  versions: ModelVersion[];
+  activeVersion: string | null;
+  defaultVersion: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelRegistryStats {
+  totalModels: number;
+  productionModels: number;
+  stagingModels: number;
+  deprecatedModels: number;
+  byFramework: Record<ModelFramework, number>;
+  byTask: Record<ModelTask, number>;
+}
+
+export interface ModelSelection {
+  modelName: string;
+  version: string;
+  framework: ModelFramework;
+  task: ModelTask;
+  reason: string;
+}
+
+// ---------------------------------------------------------------------------
+// Civic Text Dataset Types (Phase 3)
+// Labeled municipal report dataset for training, evaluation, and benchmarking
+// of SCIP AI models across 8 report categories.
+// ---------------------------------------------------------------------------
+
+export type DatasetSplit = 'train' | 'test' | 'validation';
+
+export interface CivicDatasetEntry {
+  id: string;
+  title: string;
+  description: string;
+  text: string;            // combined title + description for model input
+  trueCategory: ReportCategory;
+  urgency: UrgencyLevel;
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  source: 'seed' | 'synthetic' | 'crowd' | 'historical';
+  split: DatasetSplit;
+  stateId?: string;
+  districtId?: string;
+  localityId?: string;
+  pinCode?: string;
+  createdAt: string;
+}
+
+export interface DatasetVersion {
+  version: string;         // semver, e.g. '1.0.0', '1.1.0'
+  entryCount: number;
+  categoryDistribution: Record<ReportCategory, number>;
+  splitDistribution: Record<DatasetSplit, number>;
+  createdAt: string;
+  checksum?: string;
+  notes?: string;
+}
+
+export interface LabeledExample {
+  id: string;
+  text: string;
+  trueCategory: ReportCategory;
+  predictedCategory?: ReportCategory;
+  confidence?: number;
+  correct?: boolean;
+}
+
+export interface DatasetQualityMetrics {
+  datasetName: string;
+  version: string;
+  totalEntries: number;
+  perCategory: {
+    category: ReportCategory;
+    entryCount: number;
+    precision: number;
+    recall: number;
+    f1: number;
+    support: number;
+  }[];
+  macroPrecision: number;
+  macroRecall: number;
+  macroF1: number;
+  microPrecision: number;
+  microRecall: number;
+  microF1: number;
+  overallAccuracy: number;
+  confusionMatrix: {
+    actual: ReportCategory;
+    predicted: ReportCategory;
+    count: number;
+  }[];
+  evaluatedAt: string;
+  modelVersion: string;
+}
+
+// ---------------------------------------------------------------------------
+// Image Intelligence Types (Phase 4)
+// Metadata, analysis, and upload results for civic report evidence photos.
+// ---------------------------------------------------------------------------
+
+export type ImageSource = 'upload' | 'url' | 'camera';
+
+export interface ImageExif {
+  make?: string;
+  model?: string;
+  software?: string;
+  datetimeOriginal?: string;       // EXIF DateTimeOriginal
+  gpsLatitude?: number;            // decimal degrees
+  gpsLongitude?: number;           // decimal degrees
+  gpsAltitude?: number;            // meters
+  orientation?: number;            // EXIF orientation tag
+  width?: number;
+  height?: number;
+}
+
+export interface ImageMetadata {
+  imageId: string;
+  source: ImageSource;
+  format: 'jpeg' | 'png' | 'webp' | 'gif' | 'unknown';
+  mimeType: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+  exif?: ImageExif;
+  url?: string;                    // public URL if hosted
+  storagePath?: string;            // local filesystem path (dev only)
+  uploadedAt: string;
+  uploadedBy?: string;
+}
+
+export interface ImageAnalysis {
+  imageId: string;
+  ocrText?: string;                // OCR-extracted text (Python service)
+  detectedObjects: string[];       // detected object labels
+  sceneLabels: string[];           // scene classification labels
+  hasText: boolean;
+  hasDamage: boolean;              // heuristic: visible structural damage
+  confidence: number;              // 0 to 1 overall analysis confidence
+  modelVersion: string;
+  analyzedAt: string;
+}
+
+export interface ImageUploadResult {
+  imageId: string;
+  url: string;
+  metadata: ImageMetadata;
+  analysis?: ImageAnalysis;
 }
 
 export interface Resolution {
@@ -588,4 +792,130 @@ export const AdminLocality = {} as any;
 export const AdministrativeBoundary = {} as any;
 export const ComplaintLocation = {} as any;
 export const IPSecurityLog = {} as any;
+export const ModelFramework = {} as any;
+export const ModelTask = {} as any;
+export const ModelStatus = {} as any;
+export const ModelPerformance = {} as any;
+export const ModelVersion = {} as any;
+export const ModelRegistryEntry = {} as any;
+export const ModelRegistryStats = {} as any;
+export const ModelSelection = {} as any;
+export const DatasetSplit = {} as any;
+export const CivicDatasetEntry = {} as any;
+export const DatasetVersion = {} as any;
+export const LabeledExample = {} as any;
+export const DatasetQualityMetrics = {} as any;
+export const ImageSource = {} as any;
+export const ImageExif = {} as any;
+export const ImageMetadata = {} as any;
+export const ImageAnalysis = {} as any;
+export const ImageUploadResult = {} as any;
+export const CivicScheme = {} as any;
+export const UrbanLocalBody = {} as any;
+export const CivicEscalationLevel = {} as any;
+export const PinCodeJurisdiction = {} as any;
+export const IndiaCivicIntelligence = {} as any;
+export const CivicSchemeCategory = {} as any;
+export const UlbType = {} as any;
+export const EscalationLevel = {} as any;
+
+// ---------------------------------------------------------------------------
+// India Civic Intelligence Types (Phase 6)
+// Maps municipal report categories to Indian government schemes, Urban Local
+// Body types, and India-specific escalation matrices for civic issue resolution.
+// ---------------------------------------------------------------------------
+
+export type CivicSchemeCategory =
+  | 'swachh_bharat'
+  | 'jal_jeevan'
+  | 'amrut'
+  | 'smart_cities'
+  | 'pmgsy'
+  | 'mgnrega'
+  | 'pma_yojana'
+  | 'ayushman_bharat'
+  | 'mid_day_meal'
+  | 'icds'
+  | 'general';
+
+export interface CivicScheme {
+  id: string;
+  code: string;                 // e.g. 'SBM', 'JJM', 'AMRUT'
+  name: string;                 // e.g. 'Swachh Bharat Mission'
+  fullName: string;             // e.g. 'Swachh Bharat Abhiyan / Clean India Mission'
+  category: CivicSchemeCategory;
+  ministry: string;             // Nodal ministry (MoHUA, Jal Shakti, etc.)
+  description: string;
+  applicableReportCategories: ReportCategory[];
+  portalUrl?: string;
+  helpline?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type UlbType = 'municipal_corporation' | 'municipality' | 'nagar_panchayat' | 'cantonment_board' | 'notified_area';
+
+export interface UrbanLocalBody {
+  id: string;
+  code: string;
+  name: string;
+  type: UlbType;
+  stateId: string;
+  districtId?: string;
+  localityId?: string;
+  pincode?: string;             // Six-digit Indian PIN code
+  headTitle: string;            // e.g. 'Municipal Commissioner', 'Chief Officer'
+  headName?: string;
+  email?: string;
+  phone?: string;
+  jurisdictionAreaSqKm?: number;
+  populationEstimate?: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EscalationLevel =
+  | 'ward_officer'
+  | 'corporator'
+  | 'municipal_commissioner'
+  | 'district_collector'
+  | 'state_secretary'
+  | 'chief_minister';
+
+export interface CivicEscalationLevel {
+  level: EscalationLevel;
+  title: string;
+  description: string;
+  appliesTo: ReportCategory[];
+  minSeverity?: UrgencyLevel;
+  contactRole: string;
+  typicalResponseTimeHours: number;
+  order: number;                // Escalation sequence order (1 = first point of contact)
+}
+
+export interface PinCodeJurisdiction {
+  pinCode: string;              // Six-digit Indian PIN code
+  stateId: string;
+  districtId: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
+  ulbId?: string;
+  ulbType?: UlbType;
+}
+
+export interface IndiaCivicIntelligence {
+  reportId: string;
+  category: ReportCategory;
+  applicableSchemes: CivicScheme[];
+  primaryScheme?: CivicScheme;
+  ulbType?: UlbType;
+  escalationPath: CivicEscalationLevel[];
+  recommendedAuthority: string;
+  pinCodeJurisdiction?: PinCodeJurisdiction;
+  confidence: number;
+  generatedAt: string;
+}
 

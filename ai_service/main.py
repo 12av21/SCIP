@@ -13,6 +13,56 @@ import math
 import re
 from datetime import datetime
 
+# Optional sentence-transformers for semantic embeddings
+try:
+    from sentence_transformers import SentenceTransformer
+    import numpy as np
+    _ST_AVAILABLE = True
+except Exception:
+    SentenceTransformer = None  # type: ignore
+    np = None  # type: ignore
+    _ST_AVAILABLE = False
+
+# Lazy-loaded embedding model (loaded on first use)
+_embedding_model: Any = None
+_embedding_model_id: str = "all-MiniLM-L6-v2"
+
+
+def _get_embedding_model(model_id: str = _embedding_model_id) -> Any:
+    if not _ST_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="sentence-transformers not installed. Install with: pip install sentence-transformers"
+        )
+    global _embedding_model, _embedding_model_id
+    if _embedding_model is None or _embedding_model_id != model_id:
+        try:
+            _embedding_model = SentenceTransformer(model_id)
+            _embedding_model_id = model_id
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to load sentence-transformers model '{model_id}': {str(exc)}"
+            )
+    return _embedding_model
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if np is not None:
+        va = np.array(a, dtype=np.float64)
+        vb = np.array(b, dtype=np.float64)
+        denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
+        if denom == 0:
+            return 0.0
+        return float(np.dot(va, vb) / denom)
+    # Pure Python fallback
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
 app = FastAPI(
     title="SCIP AI Microservice",
     description="Dedicated machine learning and NLP engine for municipal community intelligence.",
@@ -82,12 +132,51 @@ class PrioritizeRequest(BaseModel):
     is_hotspot: bool = False
     affected_infrastructure: bool = False
 
+
+class EmbedRequest(BaseModel):
+    text: str
+    model_id: Optional[str] = None
+
+
+class EmbedResponse(BaseModel):
+    text: str
+    model_id: str
+    embedding: List[float]
+    dimension: int
+
+
+class EmbedBatchRequest(BaseModel):
+    texts: List[str]
+    model_id: Optional[str] = None
+
+
+class EmbedBatchResponse(BaseModel):
+    model_id: str
+    embeddings: List[List[float]]
+    dimension: int
+    count: int
+
+
+class SemanticSimilarityRequest(BaseModel):
+    text_a: str
+    text_b: str
+    model_id: Optional[str] = None
+
+
+class SemanticSimilarityResponse(BaseModel):
+    text_a: str
+    text_b: str
+    similarity: float  # cosine similarity, 0 to 1
+    model_id: str
+
 @app.get("/health")
 def health_check():
     return {
         "status": "healthy",
         "service": "SCIP Python AI Microservice",
         "engine": "TF-IDF / Centroid Classifier / Geospatial Harversine",
+        "sentence_transformers_available": _ST_AVAILABLE,
+        "embedding_model": _embedding_model_id if _ST_AVAILABLE else None,
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -204,6 +293,48 @@ def calculate_priority(req: PrioritizeRequest):
         "priority": priority,
         "explanation": f"Calculated composite risk score of {score}/100. Priority assigned as {priority}."
     }
+
+
+@app.post("/embed", response_model=EmbedResponse)
+def embed_text(req: EmbedRequest):
+    model_id = req.model_id or _embedding_model_id
+    model = _get_embedding_model(model_id)
+    embedding = model.encode(req.text).tolist()
+    return EmbedResponse(
+        text=req.text,
+        model_id=model_id,
+        embedding=embedding,
+        dimension=len(embedding)
+    )
+
+
+@app.post("/embed-batch", response_model=EmbedBatchResponse)
+def embed_batch(req: EmbedBatchRequest):
+    model_id = req.model_id or _embedding_model_id
+    model = _get_embedding_model(model_id)
+    embeddings = model.encode(req.texts).tolist()
+    return EmbedBatchResponse(
+        model_id=model_id,
+        embeddings=embeddings,
+        dimension=len(embeddings[0]) if embeddings else 0,
+        count=len(embeddings)
+    )
+
+
+@app.post("/semantic-similarity", response_model=SemanticSimilarityResponse)
+def semantic_similarity(req: SemanticSimilarityRequest):
+    model_id = req.model_id or _embedding_model_id
+    model = _get_embedding_model(model_id)
+    emb_a = model.encode(req.text_a).tolist()
+    emb_b = model.encode(req.text_b).tolist()
+    sim = _cosine_similarity(emb_a, emb_b)
+    return SemanticSimilarityResponse(
+        text_a=req.text_a,
+        text_b=req.text_b,
+        similarity=round(sim, 4),
+        model_id=model_id
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

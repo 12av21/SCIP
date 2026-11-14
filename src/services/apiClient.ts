@@ -21,7 +21,10 @@ import {
   AdminBlock,
   AdminLocality,
   IPSecurityLog,
-  AdministrativeBoundary
+  AdministrativeBoundary,
+  ImageMetadata,
+  ImageAnalysis,
+  ImageUploadResult
 } from '../types/scip.js';
 
 const TOKEN_KEY = 'scip_auth_token';
@@ -549,6 +552,49 @@ class APIClient {
     return res.data;
   }
 
+  // --- Map API Methods ---
+
+  public async getMapReports() {
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>('/api/map/reports');
+    return res.data;
+  }
+
+  public async getMapIncidents() {
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>('/api/map/incidents');
+    return res.data;
+  }
+
+  public async getMapHotspots(params?: { minReports?: string; radiusMeters?: string }) {
+    const query = new URLSearchParams();
+    if (params?.minReports) query.set('minReports', params.minReports);
+    if (params?.radiusMeters) query.set('radiusMeters', params.radiusMeters);
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>(`/api/map/hotspots?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getMapClusters() {
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>('/api/map/clusters');
+    return res.data;
+  }
+
+  public async getMapBoundaries(params?: { level?: string }) {
+    const query = params?.level ? `?level=${encodeURIComponent(params.level)}` : '';
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>(`/api/map/boundaries${query}`);
+    return res.data;
+  }
+
+  public async getMapJurisdiction(lat: number, lng: number) {
+    const res = await this.request<{ success: boolean; data: any }>(
+      `/api/map/jurisdiction?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`
+    );
+    return res.data;
+  }
+
+  public async getMapStats() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/map/stats');
+    return res.data;
+  }
+
   public async getResolutionTimeByDistrict(params?: { from?: string; to?: string }) {
     const query = new URLSearchParams();
     if (params?.from) query.set('from', params.from);
@@ -577,6 +623,47 @@ class APIClient {
       '/api/intelligence/dataset-quality'
     );
     return res.data;
+  }
+
+  // --- Image Intelligence ---
+
+  public async uploadImage(payload: {
+    dataUrl: string;
+    source?: 'upload' | 'url' | 'camera';
+    uploadedBy?: string;
+    description?: string;
+  }) {
+    const res = await this.request<{ success: boolean; data: ImageUploadResult }>('/api/image/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    return res.data;
+  }
+
+  public async getImageMetadata(imageId: string) {
+    const res = await this.request<{ success: boolean; data: ImageMetadata }>(`/api/image/metadata/${encodeURIComponent(imageId)}`);
+    return res.data;
+  }
+
+  public async analyzeImage(payload: { imageId?: string; dataUrl?: string; description?: string }) {
+    const res = await this.request<{ success: boolean; data: { imageId: string; metadata: ImageMetadata; analysis: ImageAnalysis } }>(
+      '/api/image/analyze',
+      { method: 'POST', body: JSON.stringify(payload) }
+    );
+    return res.data;
+  }
+
+  public async getImage(imageId: string): Promise<{ buffer: ArrayBuffer; mimeType: string } | null> {
+    try {
+      const res = await fetch(`/api/image/${encodeURIComponent(imageId)}`, {
+        headers: { Authorization: `Bearer ${this.getToken()}` }
+      });
+      if (!res.ok) return null;
+      const buffer = await res.arrayBuffer();
+      return { buffer, mimeType: res.headers.get('Content-Type') || 'application/octet-stream' };
+    } catch {
+      return null;
+    }
   }
 }
 
