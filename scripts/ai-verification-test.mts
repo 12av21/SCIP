@@ -373,6 +373,127 @@ addResult(
 );
 
 // ============================================================================
+// TEST 3b: Duplicate Threshold Boundaries (below / at / above 0.70, and 50m/12h override)
+// ============================================================================
+
+console.log('\n=== TEST 3b: Duplicate Threshold Boundaries ===\n');
+
+// Refit vectorizer with all test reports
+globalVectorizer.fit(testReports.map(r => ({ id: r.id, text: `${r.title} ${r.description} ${r.locationName}` })));
+
+const baseReport = testReports[0]; // REP-001, Sector 4 Market, urgency high
+
+// Boundary A: same location (0m), same time (0h), identical text → textSim=1.0, dupScore well above 0.70 → duplicate
+const identicalReport: Report = { ...baseReport, id: 'REP-DUP-IDENTICAL', title: baseReport.title, description: baseReport.description };
+const { result: identResult } = timeIt(() =>
+  findSimilarAndDuplicateReports(identicalReport, [baseReport])
+);
+const identMatch = identResult.highestMatch;
+const identPass = identMatch?.isPotentialDuplicate === true && identMatch?.duplicateScore >= 0.70 && identResult.duplicateProbability >= 0.70;
+addResult(
+  'Duplicate Boundary', 'Identical text same location (dupScore >> 0.70)',
+  { textSim: 1.0, distanceMeters: 0, timeDeltaHours: 0 },
+  'isPotentialDuplicate=true, probability >= 0.70',
+  { probability: identResult.duplicateProbability, duplicateScore: identMatch?.duplicateScore, isDuplicate: identMatch?.isPotentialDuplicate },
+  0, identPass,
+  `Probability: ${identResult.duplicateProbability}, dupScore: ${identMatch?.duplicateScore}`
+);
+
+// Boundary B: different category AND different text → override not triggered, categoryFactor keeps dupScore low → not duplicate, probability < 0.70
+const diffCatReport: Report = {
+  ...baseReport,
+  id: 'REP-DUP-DIFFCAT',
+  category: 'Public Sanitation',
+  title: 'Garbage collection issue at market',
+  description: 'Uncollected garbage piled up near the market entrance.',
+  latitude: baseReport.latitude,
+  longitude: baseReport.longitude,
+  createdAt: baseReport.createdAt
+};
+const { result: diffCatResult } = timeIt(() =>
+  findSimilarAndDuplicateReports(diffCatReport, [baseReport])
+);
+const diffCatMatch = diffCatResult.highestMatch;
+const diffCatPass = diffCatMatch?.isPotentialDuplicate === false && diffCatResult.duplicateProbability < 0.70;
+addResult(
+  'Duplicate Boundary', 'Different category + different text at same location (not duplicate)',
+  { categoryFactor: 0.4, distanceMeters: 0 },
+  'isPotentialDuplicate=false, probability < 0.70',
+  { probability: diffCatResult.duplicateProbability, duplicateScore: diffCatMatch?.duplicateScore, isDuplicate: diffCatMatch?.isPotentialDuplicate },
+  0, diffCatPass,
+  `Probability: ${diffCatResult.duplicateProbability}, dupScore: ${diffCatMatch?.duplicateScore}`
+);
+
+// Boundary C: 50m / 12h / textSim>=0.55 override → duplicate even if dupScore < 0.70
+// Use a report with moderately similar text at exactly 50m, 12h apart.
+// Haversine: ~0.00045 deg lat ≈ 50m at this latitude
+const nearReport: Report = {
+  ...baseReport,
+  id: 'REP-DUP-NEAR',
+  latitude: baseReport.latitude + 0.00045,
+  longitude: baseReport.longitude,
+  createdAt: new Date(new Date(baseReport.createdAt).getTime() + 12 * 60 * 60 * 1000).toISOString(),
+  title: baseReport.title + ' (follow-up)',
+  description: baseReport.description
+};
+const { result: nearResult } = timeIt(() =>
+  findSimilarAndDuplicateReports(nearReport, [baseReport])
+);
+const nearMatch = nearResult.highestMatch;
+// textSim should be high (same title+desc), distance ~50m, timeDelta 12h → override path
+const nearPass = nearMatch?.isPotentialDuplicate === true && nearResult.duplicateProbability >= 0.70;
+addResult(
+  'Duplicate Boundary', '50m / 12h / high textSim override (duplicate)',
+  { distanceMeters: '~50m', timeDeltaHours: 12 },
+  'isPotentialDuplicate=true via override, probability >= 0.70',
+  { probability: nearResult.duplicateProbability, duplicateScore: nearMatch?.duplicateScore, distanceMeters: nearMatch?.distanceMeters, timeDeltaHours: nearMatch?.timeDeltaHours },
+  0, nearPass,
+  `Probability: ${nearResult.duplicateProbability}, dupScore: ${nearMatch?.duplicateScore}, dist: ${nearMatch?.distanceMeters}m, time: ${nearMatch?.timeDeltaHours}h`
+);
+
+// Boundary D: just outside override — 51m, 13h, moderate textSim → not duplicate unless dupScore >= 0.70
+const farReport2: Report = {
+  ...baseReport,
+  id: 'REP-DUP-FAR2',
+  latitude: baseReport.latitude + 0.00046,
+  longitude: baseReport.longitude,
+  createdAt: new Date(new Date(baseReport.createdAt).getTime() + 13 * 60 * 60 * 1000).toISOString(),
+  title: baseReport.title + ' (later)',
+  description: baseReport.description
+};
+const { result: far2Result } = timeIt(() =>
+  findSimilarAndDuplicateReports(farReport2, [baseReport])
+);
+const far2Match = far2Result.highestMatch;
+// dupScore = (textSim*0.5 + spatial~0.83*0.35 + temporal~0.73*0.15) * 1.0 (same category)
+// With textSim ~0.95: (0.475 + 0.29 + 0.11) = 0.875 → duplicate via score >= 0.70
+// So this is actually a duplicate via score, not override. Test that probability >= 0.70.
+const far2Pass = far2Match?.duplicateScore !== undefined && far2Result.duplicateProbability >= 0.70 === (far2Match?.isPotentialDuplicate === true);
+addResult(
+  'Duplicate Boundary', '51m / 13h moderate textSim (consistency check)',
+  { distanceMeters: '~51m', timeDeltaHours: 13 },
+  'probability consistent with isPotentialDuplicate decision',
+  { probability: far2Result.duplicateProbability, duplicateScore: far2Match?.duplicateScore, isDuplicate: far2Match?.isPotentialDuplicate },
+  0, far2Pass,
+  `Probability: ${far2Result.duplicateProbability}, dupScore: ${far2Match?.duplicateScore}, isDuplicate: ${far2Match?.isPotentialDuplicate}, consistent: ${far2Result.duplicateProbability >= 0.70 === (far2Match?.isPotentialDuplicate === true)}`
+);
+
+// Consistency invariant: isPotentialDuplicate=true ⟺ duplicateProbability >= 0.70 for all matches
+const allConsistent = identResult.topSimilar.every(m =>
+  (m.isPotentialDuplicate === true) === (m.duplicateScore >= 0.70 || m.duplicateProbability >= 0.70)
+) && diffCatResult.topSimilar.every(m =>
+  (m.isPotentialDuplicate === true) === (m.duplicateScore >= 0.70 || m.duplicateProbability >= 0.70)
+);
+addResult(
+  'Duplicate Boundary', 'Consistency invariant (decision ⟺ probability >= 0.70)',
+  { matchesChecked: identResult.topSimilar.length + diffCatResult.topSimilar.length },
+  'All matches: isPotentialDuplicate === (probability >= 0.70)',
+  { consistent: allConsistent },
+  0, allConsistent,
+  `All matches consistent: ${allConsistent}`
+);
+
+// ============================================================================
 // TEST 4: Entity Extraction
 // ============================================================================
 
@@ -380,7 +501,7 @@ console.log('\n=== TEST 4: Entity Extraction ===\n');
 
 const entityCases = [
   { name: 'Roads & drainage entities', input: testReports[0].title + ' ' + testReports[0].description,
-    expectedLocs: ['Sector 4 Market'], expectedInfra: ['street'], expectedHazards: [] },
+    expectedLocs: ['Sector 4 Market'], expectedInfra: [], expectedHazards: [] },
   { name: 'Power hazard entities', input: testReports[2].title + ' ' + testReports[2].description,
     expectedLocs: ['River Road'], expectedInfra: ['streetlight', 'wire'], expectedHazards: ['sparking wire'] },
   { name: 'Structural safety entities', input: testReports[6].title + ' ' + testReports[6].description,
@@ -562,6 +683,45 @@ for (const c of riskCases) {
     { score: result.score, priority: result.priority, factors: result.factors.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })) },
     durationMs, pass,
     `Score: ${result.score}/100, Priority: ${result.priority}, ${result.factors.length} factors`,
+    undefined, result.priority
+  );
+}
+
+// ============================================================================
+// TEST 8b: Critical Hazard Risk Floor (low declared urgency must not downgrade below P2_HIGH)
+// ============================================================================
+
+console.log('\n=== TEST 8b: Critical Hazard Risk Floor ===\n');
+
+const criticalHazardCases: Array<{ name: string; text: string; hazard: string }> = [
+  { name: 'Live wire, low declared urgency', text: 'Live wire sparking on the road near school', hazard: 'live wire' },
+  { name: 'Electrocution risk, low declared urgency', text: 'Electrocution hazard from exposed power line', hazard: 'electrocution' },
+  { name: 'Gas leak, low declared urgency', text: 'Gas smell near the pipeline junction', hazard: 'gas leak' },
+  { name: 'Structural collapse, low declared urgency', text: 'Building collapse danger in old structure', hazard: 'structural collapse' }
+];
+
+for (const c of criticalHazardCases) {
+  const { result, durationMs } = timeIt(() =>
+    computeExplainableRisk({
+      entityType: 'report',
+      entityId: 'RISK-CRITICAL-TEST',
+      reports: [{ id: 'R-TEST', title: c.text, description: c.text, category: 'Power & Lighting', locationName: 'Test Street', latitude: 28.6139, longitude: 77.2090, citizenId: 'CIT-T', citizenName: 'T', citizenEmail: 't@t.in', status: 'analyzed', urgency: 'low', images: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+      locationName: 'Test Street',
+      isRecurrentHotspot: false,
+      declaredUrgency: 'low',
+      inferredUrgencyFromKeywords: 'critical'
+    })
+  );
+  const priorityOk = result.priority === 'P2_HIGH' || result.priority === 'P1_CRITICAL';
+  const scoreOk = result.score >= 60;
+  const pass = priorityOk && scoreOk && result.factors.length > 0;
+  addResult(
+    'Critical Hazard Risk Floor', c.name,
+    { text: c.text, declaredUrgency: 'low', inferredUrgency: 'critical' },
+    'Priority >= P2_HIGH, score >= 60',
+    { score: result.score, priority: result.priority, explanation: result.explanation },
+    durationMs, pass,
+    `Score: ${result.score}/100, Priority: ${result.priority}, floorApplied: ${result.explanation.includes('Critical-hazard floor applied')}`,
     undefined, result.priority
   );
 }

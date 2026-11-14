@@ -161,6 +161,7 @@ export interface SimilarReportMatch {
   timeDeltaHours: number;
   matchingTerms: string[];
   isPotentialDuplicate: boolean;
+  duplicateScore: number; // 0 to 1, same unified score used for the duplicate decision
 }
 
 export interface AIAnalysis {

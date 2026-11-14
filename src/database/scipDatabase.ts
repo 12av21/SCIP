@@ -836,12 +836,11 @@ export class SCIPDatabase {
 
     this.reports.set(id, report);
 
-    // Update TF-IDF corpus
-    const docs = Array.from(this.reports.values()).map(r => ({
-      id: r.id,
-      text: `${r.title} ${r.description} ${r.category} ${r.locationName}`
-    }));
-    globalVectorizer.fit(docs);
+    // Update TF-IDF corpus incrementally (avoid O(N) full-corpus refit on every report creation)
+    globalVectorizer.addDocument({
+      id,
+      text: `${report.title} ${report.description} ${report.category} ${report.locationName}`
+    });
 
     // Perform AI analysis
     const analysis = this.runAndStoreAIAnalysis(report, true);
@@ -1048,7 +1047,9 @@ export class SCIPDatabase {
       entityId: report.id,
       reports: [report],
       locationName: report.locationName,
-      isRecurrentHotspot: report.locationName.toLowerCase().includes('sector 4')
+      isRecurrentHotspot: report.locationName.toLowerCase().includes('sector 4'),
+      declaredUrgency: report.urgency,
+      inferredUrgencyFromKeywords: determineSeverity(text, undefined)
     });
 
     const evidence = [

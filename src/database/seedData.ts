@@ -65,14 +65,21 @@ export const SEED_DEPARTMENTS: Department[] = [
   }
 ];
 
-// Pre-hashed bcrypt for 'AdminPass123!', 'DirectorPass123!', 'OfficerPass123!', 'CitizenPass123!'
-// $2a$10$w6D4T8fW... or stored hashes
+// SECURITY: Pre-hashed bcrypt credentials only. No plaintext passwords are stored
+// in source code. These accounts are development-only and are never created in
+// production: seedDatabase() throws when a persisted database already exists, and
+// the /api/database/seed endpoint requires ENABLE_DEV_SEED=true, non-production,
+// and admin authentication.
+//
+// Account passwords are set during initial provisioning and are not recoverable
+// from this file. To rotate a dev account password, use /api/auth/change-password
+// or delete the persisted DB and re-seed in a non-production environment.
 export const SEED_USERS: User[] = [
   {
     id: 'USR-ADMIN-01',
     name: 'Adarsh Verma',
     email: 'admin@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AdminPass123!
+    passwordHash: '$2b$10$JKkcrNBnUIU1WhPIpjWKw.7H9cEalFzo.vz/3RshMt6IOMa6SsXnu',
     role: 'admin',
     phone: '+91-98765-43210',
     status: 'active',
@@ -86,7 +93,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-AUTH-01',
     name: 'Dr. Rajesh Gupta',
     email: 'director@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DirectorPass123!
+    passwordHash: '$2b$10$ANn7CXYwn5m6LglB/dxehe5QpcXtuSjiJ1qCuigNxZ6GZeO4H7Zsa',
     role: 'authority',
     phone: '+91-98765-43211',
     status: 'active',
@@ -100,7 +107,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-DEPT-01',
     name: 'Er. Sunita Patel',
     email: 'dept.patel@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DeptPass123!
+    passwordHash: '$2b$10$rp3yDtPMZRM3Lw8ufEqRquc5EPMTDg66fcZJZpOiwTZ1SxBLxrJRu',
     role: 'dept_officer',
     departmentId: 'DEP-WTR',
     departmentName: 'Water & Sewerage Authority',
@@ -116,7 +123,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-OFF-01',
     name: 'Vikram Sharma',
     email: 'officer.sharma@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // OfficerPass123!
+    passwordHash: '$2b$10$Cv36.sOU3AN6Zog3qcbzTuDvx8hqqEq7/C7hgiWJ8KtmN1OfvnPcm',
     role: 'officer',
     departmentId: 'DEP-ROADS',
     departmentName: 'Public Works & Roads Infrastructure',
@@ -132,7 +139,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-ANL-01',
     name: 'Dr. Kavita Rao',
     email: 'analyst.rao@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AnalystPass123!
+    passwordHash: '$2b$10$43Pv14ENeSDrOqwNXAprlenxx2tz3LDYZVYzxidT3ks5HZtiRJKMW',
     role: 'analyst',
     phone: '+91-98765-43230',
     status: 'active',
@@ -146,7 +153,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-01',
     name: 'Priya Sharma',
     email: 'citizen.jane@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$MRhFQnX7aAgdHxNPLln4uu8xgc9CdjtAL/NXR6slmwTnylCFgJNYW',
     role: 'citizen',
     phone: '+91-98765-43220',
     status: 'active',
@@ -160,7 +167,7 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-02',
     name: 'Rahul Mehta',
     email: 'citizen.rahul@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$t8Zz7t8VehFFqUeGMkgsge7pr/Cy9/qaH2ruyZ71G4exaGbo91hk2',
     role: 'citizen',
     phone: '+91-98765-43221',
     status: 'active',

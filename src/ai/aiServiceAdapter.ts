@@ -1,6 +1,12 @@
 // SCIP AI Adapter - Bridges Python FastAPI Service & Local TypeScript ML Engine
-// Ensures seamless fallover to high-performance local algorithms when external service is offline
-// Phase 2: Adds sentence-transformers embedding support via Python service, with model registry integration
+// Ensures seamless fallover to local algorithms when the Python service is disabled,
+// unreachable, or returns an error. The local TypeScript engine is always available.
+//
+// Configuration (environment):
+//   AI_SERVICE_URL        Base URL of the Python FastAPI service (e.g. http://localhost:8000)
+//   AI_SERVICE_ENABLED    "true" to enable Python integration (default: false)
+//   AI_SERVICE_TIMEOUT_MS Request timeout in milliseconds (default: 5000)
+// No production URLs or secrets are hardcoded.
 
 import { classifyReport } from './classifier.js';
 import { findSimilarAndDuplicateReports } from './duplicateDetector.js';
@@ -46,32 +52,115 @@ const CATEGORY_PROTOTYPES: Record<ReportCategory, string> = {
   'Noise & Disturbance': 'noise loudspeaker music sound decibel construction night disturbance honking generator'
 };
 
+export interface AIServiceConfig {
+  enabled: boolean;
+  baseUrl: string | undefined;
+  timeoutMs: number;
+}
+
+function loadAIServiceConfig(): AIServiceConfig {
+  const enabled = process.env.AI_SERVICE_ENABLED === 'true';
+  const baseUrl = process.env.AI_SERVICE_URL ? process.env.AI_SERVICE_URL.replace(/\/+$/, '') : undefined;
+  const timeoutMs = Number(process.env.AI_SERVICE_TIMEOUT_MS) || 5000;
+  return { enabled, baseUrl, timeoutMs };
+}
+
+function safeLog(message: string, ...args: unknown[]): void {
+  // Log without sensitive report/citizen data. Args should be non-PII metadata only.
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(`[SCIP AI Adapter] ${message}`, ...args);
+  }
+}
+
 export class AIServiceAdapter {
-  private serviceUrl: string | undefined;
+  private config: AIServiceConfig;
 
   constructor() {
-    this.serviceUrl = process.env.AI_SERVICE_URL;
+    this.config = loadAIServiceConfig();
+    safeLog(
+      'initialized',
+      `enabled=${this.config.enabled}`,
+      this.config.baseUrl ? `url=${this.config.baseUrl}` : 'url=unset',
+      `timeoutMs=${this.config.timeoutMs}`
+    );
+  }
+
+  /** Whether Python integration is enabled and a base URL is configured. */
+  public isServiceEnabled(): boolean {
+    return this.config.enabled && Boolean(this.config.baseUrl);
+  }
+
+  /** Current non-sensitive service configuration. */
+  public getConfig(): { enabled: boolean; baseUrl: string | undefined; timeoutMs: number } {
+    return { ...this.config };
+  }
+
+  /**
+   * Fetch with a configurable timeout and consistent error handling.
+   * Returns the parsed JSON body on success; throws on network/timeout/HTTP errors.
+   * Never logs request bodies (may contain citizen report text).
+   */
+  private async fetchWithTimeout(input: string, init: RequestInit): Promise<any> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
+
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      if (!res.ok) {
+        safeLog('python service HTTP error', `status=${res.status}`, `path=${input}`);
+        throw new Error(`Python service returned HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      safeLog('python service response ok', `path=${input}`);
+      return data;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        safeLog('python service request timeout', `timeoutMs=${this.config.timeoutMs}`, `path=${input}`);
+        throw new Error(`Python service request timed out after ${this.config.timeoutMs}ms`);
+      }
+      safeLog('python service request failed', `path=${input}`, `reason=${err?.message || String(err)}`);
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Probe the Python service health endpoint. Resolves to true only when the
+   * service is enabled, reachable, and returns a healthy status.
+   * Never throws; failures are reported as false so callers can fall back.
+   */
+  public async healthCheck(): Promise<boolean> {
+    if (!this.isServiceEnabled()) {
+      return false;
+    }
+    try {
+      const data = await this.fetchWithTimeout(`${this.config.baseUrl}/health`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' }
+      });
+      return Boolean(data && data.status === 'healthy');
+    } catch {
+      return false;
+    }
   }
 
   // ------------------------------------------------------------------
   // Embedding generation (Python sentence-transformers service)
   // ------------------------------------------------------------------
   public async embed(text: string, modelId?: string): Promise<EmbeddingResult> {
-    if (this.serviceUrl) {
+    if (this.isServiceEnabled()) {
       try {
-        const res = await fetch(`${this.serviceUrl}/embed`, {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/embed`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, model_id: modelId })
         });
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            embedding: data.embedding,
-            dimension: data.dimension,
-            modelId: data.model_id
-          };
-        }
+        return {
+          embedding: data.embedding,
+          dimension: data.dimension,
+          modelId: data.model_id
+        };
       } catch {
         // Fall through to local
       }
@@ -80,21 +169,18 @@ export class AIServiceAdapter {
   }
 
   public async embedBatch(texts: string[], modelId?: string): Promise<EmbeddingResult[]> {
-    if (this.serviceUrl) {
+    if (this.isServiceEnabled()) {
       try {
-        const res = await fetch(`${this.serviceUrl}/embed-batch`, {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/embed-batch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ texts, model_id: modelId })
         });
-        if (res.ok) {
-          const data = await res.json();
-          return data.embeddings.map((emb: number[], i: number) => ({
-            embedding: emb,
-            dimension: data.dimension,
-            modelId: data.model_id
-          }));
-        }
+        return data.embeddings.map((emb: number[], i: number) => ({
+          embedding: emb,
+          dimension: data.dimension,
+          modelId: data.model_id
+        }));
       } catch {
         // Fall through
       }
@@ -106,20 +192,17 @@ export class AIServiceAdapter {
   // Semantic similarity via sentence-transformers embeddings
   // ------------------------------------------------------------------
   public async semanticSimilarity(textA: string, textB: string, modelId?: string): Promise<SemanticSimilarityResult> {
-    if (this.serviceUrl) {
+    if (this.isServiceEnabled()) {
       try {
-        const res = await fetch(`${this.serviceUrl}/semantic-similarity`, {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/semantic-similarity`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text_a: textA, text_b: textB, model_id: modelId })
         });
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            similarity: data.similarity,
-            modelId: data.model_id
-          };
-        }
+        return {
+          similarity: data.similarity,
+          modelId: data.model_id
+        };
       } catch {
         // Fall through to local TF-IDF cosine similarity
       }
@@ -144,23 +227,20 @@ export class AIServiceAdapter {
   // Classification (existing: Python keyword or local TF-IDF centroid)
   // ------------------------------------------------------------------
   public async classify(text: string, declaredCategory?: ReportCategory): Promise<AIClassificationResult> {
-    if (this.serviceUrl) {
+    if (this.isServiceEnabled()) {
       try {
-        const res = await fetch(`${this.serviceUrl}/classify`, {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/classify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, declared_category: declaredCategory })
         });
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            predictedCategory: data.predicted_category,
-            confidence: data.confidence,
-            explanation: data.explanation,
-            lowConfidenceReview: data.low_confidence_review,
-            modelVersion: data.model_version
-          };
-        }
+        return {
+          predictedCategory: data.predicted_category,
+          confidence: data.confidence,
+          explanation: data.explanation,
+          lowConfidenceReview: data.low_confidence_review,
+          modelVersion: data.model_version
+        };
       } catch {
         // Fall back to local engine
       }
@@ -182,14 +262,14 @@ export class AIServiceAdapter {
   // ------------------------------------------------------------------
   public async classifyWithEmbeddings(text: string, declaredCategory?: ReportCategory, modelId?: string): Promise<AIClassificationResult> {
     let selectedModelId = modelId;
-    if (!selectedModelId && this.serviceUrl) {
+    if (!selectedModelId && this.config.baseUrl) {
       const selection = modelRegistry.selectModel({ task: 'classification', framework: 'sentence-transformers', preferProduction: true });
       if (selection) {
         selectedModelId = selection.version; // use version as model_id hint
       }
     }
 
-    if (this.serviceUrl && selectedModelId) {
+    if (this.isServiceEnabled() && selectedModelId) {
       try {
         // Embed the input text
         const inputEmbedding = await this.embed(text, selectedModelId);
@@ -252,7 +332,7 @@ export class AIServiceAdapter {
   // Duplicate detection (existing: Python or local TF-IDF + Haversine)
   // ------------------------------------------------------------------
   public async checkDuplicates(target: Report, corpus: Report[]) {
-    if (this.serviceUrl) {
+    if (this.isServiceEnabled()) {
       try {
         const candidates = corpus
           .filter(c => c.id !== target.id)
@@ -263,7 +343,7 @@ export class AIServiceAdapter {
             longitude: c.longitude
           }));
 
-        const res = await fetch(`${this.serviceUrl}/duplicate-check`, {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/duplicate-check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -274,9 +354,7 @@ export class AIServiceAdapter {
           })
         });
 
-        if (res.ok) {
-          return await res.json();
-        }
+        return data;
       } catch {
         // Fall back to local engine
       }

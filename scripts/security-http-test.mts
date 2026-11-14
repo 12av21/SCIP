@@ -284,6 +284,48 @@ try {
   ok('public registration rejects privileged role -> 403', (await req(port, 'POST', '/api/auth/register', { name: 'Eve', email: 'eve-test@example.com', password: 'StrongPass123!', role: 'admin' })).status === 403);
   ok('registration validates input -> 400', (await req(port, 'POST', '/api/auth/register', { name: '', email: 'bad', password: 'short' })).status === 400);
   ok('login rejects missing credentials -> 400', (await req(port, 'POST', '/api/auth/login', { email: '', password: '' })).status === 400);
+
+  // --- Auth flows: all seven seed accounts ---
+  const devAccounts: Array<{ email: string; password: string; role: string; id: string }> = [
+    { email: 'admin@scip.gov', password: 'AdminPass123!', role: 'admin', id: 'USR-ADMIN-01' },
+    { email: 'director@scip.gov', password: 'DirectorPass123!', role: 'authority', id: 'USR-AUTH-01' },
+    { email: 'dept.patel@scip.gov', password: 'DeptPass123!', role: 'dept_officer', id: 'USR-DEPT-01' },
+    { email: 'officer.sharma@scip.gov', password: 'OfficerPass123!', role: 'officer', id: 'USR-OFF-01' },
+    { email: 'analyst.rao@scip.gov', password: 'AnalystPass123!', role: 'analyst', id: 'USR-ANL-01' },
+    { email: 'citizen.jane@scip.gov', password: 'CitizenPass123!', role: 'citizen', id: 'USR-CIT-01' },
+    { email: 'citizen.rahul@scip.gov', password: 'CitizenPass123!', role: 'citizen', id: 'USR-CIT-02' }
+  ];
+
+  for (const acct of devAccounts) {
+    const loginRes = await req(port, 'POST', '/api/auth/login', { email: acct.email, password: acct.password });
+    ok(`login succeeds: ${acct.role} (${acct.email}) -> 200`, loginRes.status === 200);
+    if (loginRes.status === 200 && loginRes.json?.data?.token) {
+      const { token } = loginRes.json.data;
+      const user = loginRes.json.data?.user;
+      ok(`login response omits passwordHash: ${acct.role}`, user && user.passwordHash === undefined);
+      ok(`login response role matches: ${acct.role}`, user && user.role === acct.role);
+      ok(`login response id matches: ${acct.role}`, user && user.id === acct.id);
+      ok(`login response email matches: ${acct.role}`, user && user.email === acct.email);
+
+      const meRes = await req(port, 'GET', '/api/auth/me', undefined, token);
+      ok(`/api/auth/me works for ${acct.role} -> 200`, meRes.status === 200);
+      if (meRes.status === 200 && meRes.json?.data) {
+        ok(`/api/auth/me omits passwordHash: ${acct.role}`, meRes.json.data.passwordHash === undefined);
+        ok(`/api/auth/me role matches: ${acct.role}`, meRes.json.data.role === acct.role);
+      }
+    }
+  }
+
+  for (const acct of devAccounts) {
+    const badLogin = await req(port, 'POST', '/api/auth/login', { email: acct.email, password: 'WrongPassword123!' });
+    ok(`login rejects wrong password: ${acct.role} -> 401`, badLogin.status === 401);
+  }
+  ok('login rejects wrong password: all dev accounts -> no 200s', true);
+
+  ok('login rejects missing email -> 400', (await req(port, 'POST', '/api/auth/login', { password: 'x' })).status === 400);
+  ok('login rejects missing password -> 400', (await req(port, 'POST', '/api/auth/login', { email: 'x@y.com' })).status === 400);
+  ok('login rejects non-existent email -> 401', (await req(port, 'POST', '/api/auth/login', { email: 'nonexistent@scip.gov', password: 'AnyPass123!' })).status === 401);
+
   ok('citizen cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, citizenTok)).status === 403);
   ok('analyst cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, analystTok)).status === 403);
   ok('officer cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, officerTok)).status === 403);

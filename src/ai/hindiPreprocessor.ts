@@ -20,6 +20,9 @@ const HINDI_STOPWORDS = new Set([
   'नहीं', 'न', 'ना', 'हाँ', 'जी', 'कृपया', 'धन्यवाद', 'नमस्ते'
 ]);
 
+// Devanagari punctuation marks (danda, double danda) used as sentence delimiters in Hindi.
+const DEVANAGARI_PUNCTUATION = /[\u0964\u0965]/;
+
 // Hindi civic terminology mapping (Devanagari → English category keywords)
 const HINDI_CIVIC_TERMS: Record<string, string[]> = {
   'पानी': ['water', 'water supply'],
@@ -77,14 +80,26 @@ const HINDI_CIVIC_TERMS: Record<string, string[]> = {
   'पिन कोड': ['pincode', 'pin code'],
   'वार्ड': ['ward'],
   'नगर निगम': ['municipal corporation'],
-  'पार्षद': ['corporator', 'councillor']
+  'पार्षद': ['corporator', 'councillor'],
+  'बिजली का तार': ['electric wire', 'power cable'],
+  'टूटी सड़क': ['broken road', 'damaged road'],
+  'खुला नाला': ['open drain'],
+  'चोक नाला': ['clogged drain'],
+  'गंदा पानी': ['dirty water', 'contaminated water'],
+  'मृत जानवर': ['dead animal'],
+  'आवारा कुत्ता': ['stray dog'],
+  'चमगादड़': ['bat'],
+  'सर्प': ['snake'],
+  'जहर': ['poison'],
+  'रासायनिक गंध': ['chemical smell'],
+  'विषाक्त अपशिष्ट': ['toxic waste']
 };
 
 // Hindi urgency/criticality terms
 const HINDI_URGENCY_TERMS: Record<string, string[]> = {
-  critical: ['आपातकाल', 'आपात', 'गंभीर', 'भयानक', 'खतरनाक', 'मर गए', 'मौत', 'चोट', 'गंभीर चोट'],
-  high: ['तुरंत', 'जल्दी', 'जरूरी', 'महत्वपूर्ण', 'बड़ा', 'बड़ा', 'भीषण'],
-  medium: ['मध्यम', 'सामान्य', 'आधी', 'कुछ समय से'],
+  critical: ['आपातकाल', 'आपात', 'गंभीर', 'भयानक', 'खतरनाक', 'मर गए', 'मौत', 'चोट', 'गंभीर चोट', 'झुलस गया', 'बिजली का झटका'],
+  high: ['तुरंत', 'जल्दी', 'जरूरी', 'महत्वपूर्ण', 'बड़ा', 'बड़ा', 'भीषण', 'गंभीर समस्या'],
+  medium: ['मध्यम', 'सामान्य', 'आधी', 'कुछ समय से', 'कई दिनों से'],
   low: ['कम', 'थोड़ा', 'छोटा', 'नॉर्मल', 'सामान्य']
 };
 
@@ -93,7 +108,8 @@ const HINDI_LOCATION_TERMS = [
   'यहाँ', 'वहाँ', 'यह', 'वह', 'पास', 'के पास', 'के सामने',
   'के पास में', 'के आगे', 'के पीछे', 'के बीच में', 'के अंदर',
   'गली में', 'सड़क पर', 'चौक पर', 'बाजार में', 'पार्क में',
-  'स्कूल के पास', 'अस्पताल के पास', 'पुल के पास', 'नाली के पास'
+  'स्कूल के पास', 'अस्पताल के पास', 'पुल के पास', 'नाली के पास',
+  'मोहल्ले में', 'वार्ड में', 'कॉलोनी में', 'समाज में'
 ];
 
 export interface PreprocessedText {

@@ -162,7 +162,8 @@ export function findMultilingualSimilarAndDuplicateReports(
         distanceMeters,
         timeDeltaHours,
         matchingTerms,
-        isPotentialDuplicate: isDuplicate
+        isPotentialDuplicate: isDuplicate,
+        duplicateScore: Number(dupScore.toFixed(4))
       });
     }
   }
@@ -178,8 +179,11 @@ export function findMultilingualSimilarAndDuplicateReports(
 
   if (highestMatch) {
     if (highestMatch.isPotentialDuplicate) {
+      // Probability derived from the same duplicateScore that drove isPotentialDuplicate,
+      // so isPotentialDuplicate=true ⟺ duplicateProbability >= 0.70.
+      const dupScore = highestMatch.duplicateScore ?? 0;
       duplicateProbability = Number(
-        Math.min(0.95, (highestMatch.similarityScore * 0.55) + (Math.max(0, 1 - highestMatch.distanceMeters / 200) * 0.35) + (highestMatch.timeDeltaHours <= 24 ? 0.1 : 0)).toFixed(2)
+        Math.min(0.95, Math.max(0.70, dupScore)).toFixed(2)
       );
       evidence.push(`High spatial proximity: ${highestMatch.distanceMeters}m from Report ${highestMatch.reportId}`);
       evidence.push(`Temporal window: within ${highestMatch.timeDeltaHours} hours of prior submission`);
@@ -188,7 +192,8 @@ export function findMultilingualSimilarAndDuplicateReports(
       }
       evidence.push('AI Interpretation: Potential duplicate citizen report regarding the same underlying ground event');
     } else {
-      duplicateProbability = Number(Math.max(0.05, highestMatch.similarityScore * 0.4).toFixed(2));
+      const dupScore = highestMatch.duplicateScore ?? 0;
+      duplicateProbability = Number(Math.min(0.69, Math.max(0.00, dupScore)).toFixed(2));
       evidence.push(`Related reports identified in vicinity (${highestMatch.distanceMeters}m), but distinct observations`);
     }
   } else {

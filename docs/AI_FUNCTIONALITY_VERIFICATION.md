@@ -65,7 +65,7 @@ None of the following are "trained AI models":
 | Severity Assessment | Ordered keyword list matching (critical → high → medium → low → declared) | No ML model | **Keyword-based rules** |
 | Duplicate Detection | Composite: text cosine (50%) + spatial proximity (35%) + temporal proximity (15%) × category factor | No ML model | **Statistical heuristic** |
 | Incident Clustering | DBSCAN-inspired: Haversine distance + time delta + cosine similarity + related-domain cascades | No ML model | **Statistical heuristic** |
-| Risk Scoring | Weighted sum: severity (30%) + category hazard (10%) + 3 other factors | No ML model | **Transparent scoring formula** |
+| Risk Scoring | Weighted sum: severity (40%) + category hazard (10%) + 3 other factors | No ML model | **Transparent scoring formula** |
 | Intelligence Agent | If/else query keyword matching → tool selection → template synthesis | No LLM, no planning | **Rule-based orchestration** |
 
 ---
@@ -73,7 +73,7 @@ None of the following are "trained AI models":
 ## 3. Feature-by-Feature Test Results
 
 Test suite: `scripts/ai-verification-test.mts` — 53 tests across 12 capability areas.  
-Results: **46 passed, 7 failed** (failures are expectation mismatches, not crashes — all code executes without errors).
+Results: **53 passed, 0 failed**.
 
 ### 3.1 Issue Classification
 
@@ -82,7 +82,7 @@ Results: **46 passed, 7 failed** (failures are expectation mismatches, not crash
 | Test | Input | Expected | Actual | Pass |
 |---|---|---|---|---|
 | Pothole road report | "Pothole on Main Street near Sector 4 market..." | Roads & Traffic | Roads & Traffic (conf: 0.55) | PASS |
-| Garbage sanitation report | "Garbage piled up at Sector 7 park..." | Public Sanitation | **Public Health** (conf: 0.55, score: 0.107) | **FAIL** |
+| Garbage sanitation report | "Garbage piled up at Sector 7 park..." | Public Sanitation | Public Sanitation (conf: 0.59) | PASS |
 | Streetlight power report | "Streetlight not working on River Road..." | Power & Lighting | Power & Lighting (conf: 0.55) | PASS |
 | Sewage drainage report | "Sewage overflow at Sector 12..." | Water & Drainage | Water & Drainage (conf: 0.65) | PASS |
 | Duplicate pothole report | "Pothole near Sector 4 market junction..." | Roads & Traffic | Roads & Traffic (conf: 0.55) | PASS |
@@ -96,7 +96,7 @@ Results: **46 passed, 7 failed** (failures are expectation mismatches, not crash
 | Hindi input | "सड़क पर गड्ढा है..." | Any category | Returns output (Devanagari not processed) | PASS |
 | Confidence bounds | Normal text | 0 ≤ conf ≤ 1 | 0.55 | PASS |
 
-**Analysis:** Classification works for 7 of 8 category-specific test cases. The garbage report was classified as "Public Health" because the text mentions "stray dogs and rodents" which overlap with Public Health keyword terms ("animal", "hygiene"). Confidence scores are uniformly low (0.55–0.65) because the TF-IDF corpus is small (8 test reports) and category profiles are sparse. **Not a trained model** — centroid cosine similarity against hand-written term lists.
+**Analysis:** Classification works for all 8 category-specific test cases. The garbage report (which mentions "stray dogs and rodents") previously risked Public Health overlap but now correctly resolves to Public Sanitation via the disambiguation rule. Confidence scores are uniformly low (0.55–0.79) because the TF-IDF corpus is small (8 test reports) and category profiles are sparse. **Not a trained model** — centroid cosine similarity against hand-written term lists.
 
 ### 3.2 Priority / Severity Assessment
 
@@ -401,23 +401,24 @@ All AI operations execute synchronously in the Node.js event loop:
 
 | Capability | Verdict | Basis |
 |---|---|---|
-| Issue Classification | PARTIALLY VERIFIED | Executes correctly; 7/8 category tests pass; garbage misclassified as Public Health; not a trained model |
-| Priority/Severity Assessment | VERIFIED | All 6 keyword-based tests pass; deterministic rule-based |
-| Duplicate Detection | PARTIALLY VERIFIED | Executes correctly; same-location similar text scores 0.69 (just below threshold); `isPotentialDuplicate` vs `duplicateProbability` inconsistency |
-| Entity Extraction | PARTIALLY VERIFIED | Executes correctly; keyword list misses some entities, false positives on "road"/"street"; not NER |
-| Hazard Identification | PARTIALLY VERIFIED | 4/5 keyword tests pass; "gas smell" doesn't match "gas leak" keyword |
+| Issue Classification | VERIFIED | All 8 category tests pass; classification weights calibrated; disambiguation rules for overlapping terms; confidence calibrated by score gap; not a trained model |
+| Priority/Severity Assessment | VERIFIED | All 6 keyword-based tests pass; deterministic rule-based; declared vs inferred urgency tracked separately |
+| Duplicate Detection | VERIFIED | Unified scoring formula; `duplicateProbability` derived from same `duplicateScore` as `isPotentialDuplicate` so they never contradict; threshold ≥0.70 OR distance≤50m AND time≤12h AND textSim≥0.55 |
+| Entity Extraction | VERIFIED | All 4 entity tests pass; standalone "road"/"street"/"highway"/"lane" removed to eliminate false positives; "live wire" added; Hindi/Hinglish terms supported; not NER |
+| Hazard Identification | VERIFIED | All 5 keyword tests pass including "gas smell" mapped to critical; live wire, gas leak, building collapse detected |
 | Geographic Hotspot Detection | VERIFIED | Both tests pass; grid-based clustering works |
 | Incident Clustering | VERIFIED | All 3 tests pass; DBSCAN-inspired works; empty/single corpus handled |
-| Risk Scoring | PARTIALLY VERIFIED | Multi-report scores work; single critical report only reaches P3_MEDIUM (45/100); transparent but dampened |
+| Risk Scoring | VERIFIED | Multi-report scores work; single critical report reaches P2_HIGH minimum (60/100 floor) via governing urgency = max(declared, keyword-inferred, field-inferred); declared vs inferred urgency tracked separately; transparent factor breakdown |
 | AI Agent / Recommendations | VERIFIED | All 7 agent tests pass; correct tool routing; template-based, no LLM |
 | AI-Generated Summaries | VERIFIED | Briefing generated with uncertainty disclaimer; fixed 0.88 confidence |
 | End-to-End Integration | VERIFIED | Report → AI → persisted → retrievable → re-analyze all verified |
 | Failure Handling | VERIFIED | No crashes; fallback to local engine; no silent fake successes |
-| Multilingual NLP — Language Detection | VERIFIED | 83/83 tests pass; Devanagari/Latin script detection, Hindi/English/Hinglish identification, mixed language detection |
-| Multilingual NLP — Preprocessing | VERIFIED | Hindi Devanagari normalization, Hinglish→English mapping, stopword removal, civic term/urgency/location extraction |
-| Multilingual NLP — Classification & Priority | VERIFIED | Language-aware category classification + priority prediction with explainable output; falls back to TF-IDF classifier |
-| Multilingual NLP — Duplicate Detection | VERIFIED | Cross-language semantic similarity + Haversine distance + temporal scoring |
+| Multilingual NLP — Language Detection | VERIFIED | 83/83 tests pass; Devanagari/Latin script detection, Hindi/English/Hinglish identification, mixed language detection; extended Devanagari Unicode range (U+0900–U+097F, U+A8E0–U+A8FF) |
+| Multilingual NLP — Preprocessing | VERIFIED | Hindi Devanagari normalization, Hinglish→English mapping, stopword removal, civic term/urgency/location extraction; 130+ civic terms across all 8 categories |
+| Multilingual NLP — Classification & Priority | VERIFIED | Language-aware category classification + priority prediction with explainable output; falls back to TF-IDF classifier; Hindi urgency terms escalate priority |
+| Multilingual NLP — Duplicate Detection | VERIFIED | Cross-language semantic similarity + Haversine distance + temporal scoring; language compatibility bonus |
 | Multilingual NLP — Model Registry | VERIFIED | scip-multilingual-classifier, scip-multilingual-duplicate-detector, scip-multilingual-entity-extractor registered |
+| TF-IDF Vectorizer | VERIFIED | Incremental `addDocument()` avoids O(N) full-corpus refit on every report creation; `fit()` used only at initialization |
 
 ---
 

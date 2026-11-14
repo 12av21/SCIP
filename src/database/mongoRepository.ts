@@ -374,9 +374,11 @@ export class MongoScipRepository implements IScipRepository {
 
       await ReportModel.create(report, { session });
 
-      const allReports = (await ReportModel.find().lean()).map(d => stripMongo<Report>(d)!).filter(Boolean) as Report[];
-      const docs = allReports.map(r => ({ id: r.id, text: `${r.title} ${r.description} ${r.category} ${r.locationName}` }));
-      globalVectorizer.fit(docs);
+      // Update TF-IDF corpus incrementally (avoid O(N) full-corpus refit on every report creation)
+      globalVectorizer.addDocument({
+        id,
+        text: `${report.title} ${report.description} ${report.category} ${report.locationName}`
+      });
 
       const analysis = await this.runAndStoreAIAnalysis(report as Report, true);
 
@@ -400,8 +402,8 @@ export class MongoScipRepository implements IScipRepository {
 
   async runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): Promise<AIAnalysis> {
     const allReports = (await ReportModel.find().lean()).map(d => stripMongo<Report>(d)!).filter(Boolean) as Report[];
-    // ensure corpus fitted for keyword extraction/similarity consumers that rely on vectorizer state
-    globalVectorizer.fit(allReports.map(r => ({ id: r.id, text: `${r.title} ${r.description} ${r.category} ${r.locationName}` })));
+    // Vectorizer state is maintained incrementally via addDocument() on report creation;
+    // no full-corpus refit needed here.
     const text = `${report.title} ${report.description} ${report.locationName}`;
 
     const classResult = classifyReport(text, report.category as any);
@@ -412,7 +414,9 @@ export class MongoScipRepository implements IScipRepository {
     const severityIndicator = determineSeverity(text, report.urgency as any);
     const riskEval = computeExplainableRisk({
       entityType: 'report', entityId: report.id, reports: [report], locationName: report.locationName,
-      isRecurrentHotspot: String(report.locationName || '').toLowerCase().includes('sector 4')
+      isRecurrentHotspot: String(report.locationName || '').toLowerCase().includes('sector 4'),
+      declaredUrgency: report.urgency as any,
+      inferredUrgencyFromKeywords: determineSeverity(text, undefined) as any
     } as any);
 
     const evidence = [

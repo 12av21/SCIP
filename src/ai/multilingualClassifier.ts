@@ -18,20 +18,20 @@ import { globalVectorizer } from './tfidf.js';
 // Maps category → language-specific terms for boosting classification confidence
 const CATEGORY_HINDI_KEYWORDS: Record<ReportCategory, { hi: string[]; hinglish: string[] }> = {
   'Water & Drainage': {
-    hi: ['पानी', 'नाली', 'नाला', 'गटर', 'सीवर', 'बाढ़', 'जलभराव', 'पाइप', 'लीकेज', 'ओवरफ्लो'],
-    hinglish: ['pani', 'paani', 'nala', 'naala', 'gutter', 'sewer', 'drain', 'flood', 'jalbhrav', 'leakage', 'overflow']
+    hi: ['पानी', 'पानी की कमी', 'नाली', 'नाला', 'गटर', 'सीवर', 'बाढ़', 'जलभराव', 'पाइप', 'लीकेज', 'ओवरफ्लो', 'खुला नाला', 'चोक नाला', 'गंदा पानी'],
+    hinglish: ['pani', 'paani', 'nala', 'naala', 'gutter', 'sewer', 'drain', 'flood', 'jalbhrav', 'leakage', 'overflow', 'open drain', 'clogged drain', 'dirty water', 'contaminated water']
   },
   'Roads & Traffic': {
-    hi: ['सड़क', 'गड्ढा', 'यातायात', 'सिग्नल', 'ट्रैफिक', 'जाम', 'एस्पाल्ट', 'फुटपाथ'],
-    hinglish: ['sadak', 'gaddha', 'pothole', 'traffic', 'jam', 'signal', 'asphalt', 'footpath', 'footpath']
+    hi: ['सड़क', 'गड्ढा', 'यातायात', 'सिग्नल', 'ट्रैफिक', 'जाम', 'एस्पाल्ट', 'फुटपाथ', 'टूटी सड़क'],
+    hinglish: ['sadak', 'gaddha', 'pothole', 'traffic', 'jam', 'signal', 'asphalt', 'footpath', 'footpath', 'broken road', 'damaged road']
   },
   'Public Sanitation': {
-    hi: ['कूड़ा', 'कचरा', 'गंदगी', 'सफाई', 'डस्टबिन', 'कूड़ादान', 'कचरा डाला', 'सफाई कर्मचारी'],
-    hinglish: ['kuda', 'kchra', 'gandagi', 'safai', 'dustbin', 'garbage', 'waste', 'trash', 'dumping', 'litter']
+    hi: ['कूड़ा', 'कचरा', 'गंदगी', 'सफाई', 'डस्टबिन', 'कूड़ादान', 'कचरा डाला', 'सफाई कर्मचारी', 'मृत जानवर', 'विषाक्त अपशिष्ट'],
+    hinglish: ['kuda', 'kchra', 'gandagi', 'safai', 'dustbin', 'garbage', 'waste', 'trash', 'dumping', 'litter', 'dead animal', 'toxic waste']
   },
   'Power & Lighting': {
-    hi: ['बिजली', 'लाइट', 'स्ट्रीट लाइट', 'ट्रांसफार्मर', 'बिजली कटौती', 'अंधेरा', 'तार', 'कबल'],
-    hinglish: ['bijli', 'light', 'streetlight', 'street light', 'transformer', 'blackout', 'outage', 'power cut', 'wire', 'cable']
+    hi: ['बिजली', 'लाइट', 'स्ट्रीट लाइट', 'ट्रांसफार्मर', 'बिजली कटौती', 'अंधेरा', 'तार', 'कबल', 'बिजली का तार', 'रौशनी'],
+    hinglish: ['bijli', 'light', 'streetlight', 'street light', 'transformer', 'blackout', 'outage', 'power cut', 'wire', 'cable', 'electric wire', 'power cable', 'lighting', 'illumination']
   },
   'Parks & Environment': {
     hi: ['पार्क', 'पेड़', 'झाड़ी', 'बगीचा', 'झील', 'तालाब', 'पौधा', 'हरियाली'],
@@ -42,8 +42,8 @@ const CATEGORY_HINDI_KEYWORDS: Record<ReportCategory, { hi: string[]; hinglish: 
     hinglish: ['building', 'wall', 'crack', 'collapse', 'bridge', 'pillar', 'structure', 'dangerous', 'unstable']
   },
   'Public Health': {
-    hi: ['मच्छर', 'बीमारी', 'डेंगू', 'मलेरिया', 'चूहा', 'कुत्ता', 'कचरा', 'स्वच्छता'],
-    hinglish: ['mosquito', 'disease', 'dengue', 'malaria', 'rodent', 'rat', 'dog', 'bite', 'hygiene', 'medical waste']
+    hi: ['मच्छर', 'बीमारी', 'डेंगू', 'मलेरिया', 'चूहा', 'कुत्ता', 'कचरा', 'स्वच्छता', 'आवारा कुत्ता', 'चमगादड़', 'सर्प', 'जहर', 'रासायनिक गंध'],
+    hinglish: ['mosquito', 'disease', 'dengue', 'malaria', 'rodent', 'rat', 'dog', 'bite', 'hygiene', 'medical waste', 'stray dog', 'bat', 'snake', 'poison', 'chemical smell']
   },
   'Noise & Disturbance': {
     hi: ['शोर', 'ध्वनि', 'लाउडस्पीकर', 'निर्माण', 'शोरगुल', 'शांति भंग'],

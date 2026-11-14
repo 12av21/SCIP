@@ -17,8 +17,8 @@ export interface LanguageDetectionResult {
   reasoning: string[];
 }
 
-// Devanagari Unicode block: U+0900–U+097F
-const DEVANAGARI_RE = /[\u0900-\u097F]/;
+// Devanagari Unicode block: U+0900–U+097F (basic) + U+A8E0–U+A8FF (Devanagari Extended)
+const DEVANAGARI_RE = /[\u0900-\u097F\uA8E0-\uA8FF]/;
 // Latin (ASCII letters)
 const LATIN_RE = /[a-zA-Z]/;
 // Hinglish indicator words (Romanized Hindi commonly used in civic complaints)

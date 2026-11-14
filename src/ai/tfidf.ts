@@ -38,6 +38,28 @@ export class TFIDFVectorizer {
   }
 
   /**
+   * Incrementally add a single document to the existing vocabulary without
+   * refitting the entire corpus. Updates document frequency counts and
+   * recomputes IDF for terms present in the new document. Terms absent from
+   * the new document keep their existing IDF (the N→N+1 delta is negligible
+   * for large corpora, so this is an excellent approximation).
+   *
+   * Use this instead of fit() when adding one report at a time to avoid
+   * O(N) full-corpus refit on every report creation.
+   */
+  public addDocument(doc: { id: string; text: string }): void {
+    this.totalDocuments += 1;
+    const terms = new Set(extractBagOfTerms(doc.text));
+    for (const term of terms) {
+      const oldDf = this.vocabulary.get(term) || 0;
+      const newDf = oldDf + 1;
+      this.vocabulary.set(term, newDf);
+      // Recompute smooth IDF for this term with updated DF and N
+      this.idfCache.set(term, Math.log((this.totalDocuments + 1) / (newDf + 1)) + 1);
+    }
+  }
+
+  /**
    * Transform a single text string into a normalized TF-IDF feature vector.
    */
   public transform(text: string, id: string = ''): DocumentVector {

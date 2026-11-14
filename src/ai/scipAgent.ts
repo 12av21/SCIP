@@ -218,7 +218,9 @@ export class SCIPIntelligenceAgent {
       entityId: `EVAL-${Date.now().toString().slice(-4)}`,
       reports: matchingReports,
       locationName: loc,
-      isRecurrentHotspot: isHotspot
+      isRecurrentHotspot: isHotspot,
+      declaredUrgency: undefined,
+      inferredUrgencyFromKeywords: undefined
     });
 
     return {
