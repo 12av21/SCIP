@@ -76,6 +76,9 @@ export const SEED_USERS: User[] = [
     role: 'admin',
     phone: '+91-98765-43210',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z'
   },
@@ -87,6 +90,9 @@ export const SEED_USERS: User[] = [
     role: 'authority',
     phone: '+91-98765-43211',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-05T09:30:00.000Z',
     updatedAt: '2026-01-05T09:30:00.000Z'
   },
@@ -100,6 +106,9 @@ export const SEED_USERS: User[] = [
     departmentName: 'Water & Sewerage Authority',
     phone: '+91-98765-43213',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:30:00.000Z',
     updatedAt: '2026-01-10T11:30:00.000Z'
   },
@@ -113,6 +122,9 @@ export const SEED_USERS: User[] = [
     departmentName: 'Public Works & Roads Infrastructure',
     phone: '+91-98765-43212',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:00:00.000Z',
     updatedAt: '2026-01-10T11:00:00.000Z'
   },
@@ -124,6 +136,9 @@ export const SEED_USERS: User[] = [
     role: 'analyst',
     phone: '+91-98765-43230',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-12T10:00:00.000Z',
     updatedAt: '2026-01-12T10:00:00.000Z'
   },
@@ -135,6 +150,9 @@ export const SEED_USERS: User[] = [
     role: 'citizen',
     phone: '+91-98765-43220',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-01T14:15:00.000Z',
     updatedAt: '2026-02-01T14:15:00.000Z'
   },
@@ -146,6 +164,9 @@ export const SEED_USERS: User[] = [
     role: 'citizen',
     phone: '+91-98765-43221',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-03T16:00:00.000Z',
     updatedAt: '2026-02-03T16:00:00.000Z'
   }

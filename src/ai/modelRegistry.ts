@@ -338,3 +338,40 @@ modelRegistry.registerModel({
   isDefault: true,
   createdBy: 'system',
 });
+
+// Multilingual (Hindi/English/Hinglish) models
+modelRegistry.registerModel({
+  name: 'scip-multilingual-classifier',
+  displayName: 'SCIP Multilingual Classifier',
+  description: 'Language-aware category classifier for Hindi, English, and Hinglish civic complaints',
+  version: '1.0.0',
+  framework: 'tfidf-ts',
+  task: 'classification',
+  status: 'production',
+  isDefault: false,
+  createdBy: 'system'
+});
+
+modelRegistry.registerModel({
+  name: 'scip-multilingual-duplicate-detector',
+  displayName: 'SCIP Multilingual Duplicate Detector',
+  description: 'Cross-language duplicate detection for Hindi, English, and Hinglish reports',
+  version: '1.0.0',
+  framework: 'tfidf-ts',
+  task: 'duplicate-detection',
+  status: 'production',
+  isDefault: false,
+  createdBy: 'system'
+});
+
+modelRegistry.registerModel({
+  name: 'scip-multilingual-entity-extractor',
+  displayName: 'SCIP Multilingual Entity Extractor',
+  description: 'Location, infrastructure, and hazard extraction for Hindi, English, and Hinglish text',
+  version: '1.0.0',
+  framework: 'tfidf-ts',
+  task: 'entity-extraction',
+  status: 'production',
+  isDefault: false,
+  createdBy: 'system'
+});

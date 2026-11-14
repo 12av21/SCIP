@@ -199,6 +199,16 @@ export const db: IScipRepository = {
   listBackups: delegate('listBackups'),
   pruneBackups: delegate('pruneBackups'),
   restoreFromBackup: delegate('restoreFromBackup'),
+
+  // --- Email & SMS Verification ---
+  setUserEmailVerificationToken: delegate('setUserEmailVerificationToken'),
+  setUserPhoneVerificationOtp: delegate('setUserPhoneVerificationOtp'),
+  verifyUserEmail: delegate('verifyUserEmail'),
+  verifyUserPhone: delegate('verifyUserPhone'),
+  getUserVerificationStatus: delegate('getUserVerificationStatus'),
+  incrementVerificationAttempts: delegate('incrementVerificationAttempts'),
+  resetVerificationAttempts: delegate('resetVerificationAttempts'),
+  updateUserVerificationStatus: delegate('updateUserVerificationStatus'),
 } as IScipRepository;
 
 export const REQUESTED_DATABASE_DRIVER: DatabaseDriverSelection = requestedDriver;

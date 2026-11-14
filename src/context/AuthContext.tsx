@@ -13,6 +13,14 @@ interface AuthContextType {
   logout: () => Promise<void>;
   switchDemoRole: (role: UserRole) => Promise<void>;
   hasPermission: (permission: UserPermission) => boolean;
+  // Verification
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  sendEmailVerification: (email: string) => Promise<void>;
+  verifyEmail: (email: string, token: string) => Promise<void>;
+  sendSmsVerification: (phone: string) => Promise<void>;
+  verifySms: (phone: string, otp: string) => Promise<void>;
+  resendVerification: (channel: 'email' | 'sms') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -110,6 +118,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Verification state derived from user object
+  const emailVerified = Boolean(user?.emailVerified);
+  const phoneVerified = Boolean(user?.phoneVerified);
+
   useEffect(() => {
     // Initial user load from local storage if previously authenticated
     const storedUser = api.getStoredUser();
@@ -159,6 +171,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // --- Verification methods ---
+
+  const sendEmailVerification = async (email: string) => {
+    await api.sendEmailVerification(email);
+  };
+
+  const verifyEmail = async (email: string, token: string) => {
+    const res = await api.verifyEmail(email, token);
+    // Refresh user data after verification
+    if (res.success) {
+      const me = await api.getStoredUser ? null : null;
+      // User will be updated on next login or via status fetch
+    }
+  };
+
+  const sendSmsVerification = async (phone: string) => {
+    await api.sendSmsVerification(phone);
+  };
+
+  const verifySms = async (phone: string, otp: string) => {
+    await api.verifySms(phone, otp);
+  };
+
+  const resendVerification = async (channel: 'email' | 'sms') => {
+    await api.resendVerification(channel);
+  };
+
   const hasPermission = (permission: UserPermission): boolean => {
     if (!user) return false;
     const permissions = ROLE_PERMISSIONS[user.role] || [];
@@ -176,7 +215,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         logout,
         switchDemoRole,
-        hasPermission
+        hasPermission,
+        emailVerified,
+        phoneVerified,
+        sendEmailVerification,
+        verifyEmail,
+        sendSmsVerification,
+        verifySms,
+        resendVerification
       }}
     >
       {children}

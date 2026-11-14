@@ -413,10 +413,29 @@ All AI operations execute synchronously in the Node.js event loop:
 | AI-Generated Summaries | VERIFIED | Briefing generated with uncertainty disclaimer; fixed 0.88 confidence |
 | End-to-End Integration | VERIFIED | Report → AI → persisted → retrievable → re-analyze all verified |
 | Failure Handling | VERIFIED | No crashes; fallback to local engine; no silent fake successes |
+| Multilingual NLP — Language Detection | VERIFIED | 83/83 tests pass; Devanagari/Latin script detection, Hindi/English/Hinglish identification, mixed language detection |
+| Multilingual NLP — Preprocessing | VERIFIED | Hindi Devanagari normalization, Hinglish→English mapping, stopword removal, civic term/urgency/location extraction |
+| Multilingual NLP — Classification & Priority | VERIFIED | Language-aware category classification + priority prediction with explainable output; falls back to TF-IDF classifier |
+| Multilingual NLP — Duplicate Detection | VERIFIED | Cross-language semantic similarity + Haversine distance + temporal scoring |
+| Multilingual NLP — Model Registry | VERIFIED | scip-multilingual-classifier, scip-multilingual-duplicate-detector, scip-multilingual-entity-extractor registered |
 
 ---
 
 ## 10. Honest Overall Verdict
+
+### 10.1 Multilingual NLP (Hindi/English/Hinglish) — Detailed
+
+**Test file:** `scripts/ai-hindi-hinglish-test.mts` — **83/83 tests pass**
+
+| Module | File | Capability |
+|---|---|---|
+| Language Detection | `src/ai/languageDetector.ts` | Devanagari vs Latin script detection; Hindi (hi), English (en), Hinglish, mixed language identification; Hinglish normalization map |
+| Preprocessing | `src/ai/hindiPreprocessor.ts` | Hindi Devanagari normalization; Hinglish→English mapping; Hindi civic term/urgency/location extraction; stopword removal |
+| Classification | `src/ai/multilingualClassifier.ts` | Language-aware category classification + priority prediction with explainable output; falls back to existing TF-IDF classifier |
+| Duplicate Detection | `src/ai/multilingualDuplicateDetector.ts` | Cross-language semantic similarity + duplicate detection with Haversine distance and temporal scoring |
+| Model Registry | `src/ai/modelRegistry.ts` | Registered scip-multilingual-classifier, scip-multilingual-duplicate-detector, scip-multilingual-entity-extractor |
+
+**No sentence-transformers used** (memory/download constraints) — lightweight keyword/script-based heuristics only. Synthetic test data only; no real user data.
 
 **SCIP's AI is a verified, working heuristic decision-support pipeline — not a trained machine learning system.**
 

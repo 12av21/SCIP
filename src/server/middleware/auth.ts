@@ -267,6 +267,26 @@ export function requirePermission(permission: UserPermission) {
       return;
     }
 
+    // Unverified accounts cannot access protected resources
+    const user = req.user as any;
+    if (!user.emailVerified && !user.phoneVerified) {
+      await db.logAudit({
+        action: 'SECURITY_EVENT',
+        module: 'security',
+        userId: req.user.id,
+        userEmail: req.user.email,
+        userRole: req.user.role,
+        ipAddress: req.ip || '127.0.0.1',
+        details: `Access denied: Unverified account attempted to use permission "${permission}"`
+      });
+      res.status(403).json({
+        success: false,
+        message: 'Account verification required.',
+        errors: ['Please verify your email or phone number before accessing this resource.']
+      });
+      return;
+    }
+
     if (!hasPermission(req.user.role, permission)) {
       await db.logAudit({
         action: 'SECURITY_EVENT',
@@ -308,6 +328,76 @@ export function requireRole(allowedRoles: UserRole[]) {
 
     next();
   };
+}
+
+/**
+ * Middleware: requires the authenticated user to have at least one verified
+ * contact channel (email or phone). Unverified users are blocked from most
+ * protected endpoints but can still access verification routes.
+ */
+export function requireVerification(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Unauthenticated.' });
+    return;
+  }
+
+  const user = req.user as any;
+  const isVerified = user.emailVerified || user.phoneVerified;
+
+  if (!isVerified) {
+    res.status(403).json({
+      success: false,
+      message: 'Account verification required.',
+      errors: ['Please verify your email or phone number before accessing this resource.']
+    });
+    return;
+  }
+
+  next();
+}
+
+/**
+ * Middleware: requires email verification specifically.
+ */
+export function requireEmailVerification(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Unauthenticated.' });
+    return;
+  }
+
+  const user = req.user as any;
+  if (!user.emailVerified) {
+    res.status(403).json({
+      success: false,
+      message: 'Email verification required.',
+      errors: ['Please verify your email address before accessing this resource.']
+    });
+    return;
+  }
+
+  next();
+}
+
+/**
+ * Middleware: requires phone verification specifically.
+ */
+export function requirePhoneVerification(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Unauthenticated.' });
+    return;
+  }
+
+  const user = req.user as any;
+  if (!user.phoneVerified) {
+    res.status(403).json({
+      success: false,
+      message: 'Phone verification required.',
+      errors: ['Please verify your phone number before accessing this resource.']
+    });
+    return;
+  }
+
+  next();
 }
 
 /**

@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes';
+import verificationRoutes from './routes/verificationRoutes';
 import reportRoutes from './routes/reportRoutes';
 import incidentRoutes from './routes/incidentRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
@@ -122,6 +123,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // REST API Routes
   app.use('/api/auth', authRoutes);
+  app.use('/api/verification', verificationRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/incidents', incidentRoutes);
   app.use('/api/intelligence', intelligenceRoutes);

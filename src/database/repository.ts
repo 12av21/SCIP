@@ -158,4 +158,14 @@ export interface IScipRepository {
   listBackups(backupDir?: string): { file: string; name: string; size: number; savedAt: string | null; recordCount: number }[] | Promise<{ file: string; name: string; size: number; savedAt: string | null; recordCount: number }[]>;
   pruneBackups(retentionCount: number, backupDir?: string): { pruned: number; remaining: number } | Promise<{ pruned: number; remaining: number }>;
   restoreFromBackup(backupFile: string, storageFile?: string): SCIPDatabase | Promise<SCIPDatabase>;
+
+  // --- Email & SMS Verification ---
+  setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string): Promise<void> | void;
+  setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string): Promise<void> | void;
+  verifyUserEmail(userId: string, token: string): Promise<boolean> | boolean;
+  verifyUserPhone(userId: string, otp: string): Promise<boolean> | boolean;
+  getUserVerificationStatus(userId: string): Promise<{ emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined> | { emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined;
+  incrementVerificationAttempts(userId: string): Promise<void> | void;
+  resetVerificationAttempts(userId: string): Promise<void> | void;
+  updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }): Promise<void> | void;
 }

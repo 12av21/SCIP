@@ -54,9 +54,18 @@ export interface User {
   departmentId?: string;
   departmentName?: string;
   phone?: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'unverified';
   sessionVersion?: number;
   credentialsResetRequired?: boolean;
+  // Verification status
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  emailVerificationTokenHash?: string;    // hashed token, never plaintext
+  emailVerificationTokenExpiresAt?: string;
+  phoneVerificationOtpHash?: string;      // hashed OTP, never plaintext
+  phoneVerificationOtpExpiresAt?: string;
+  verificationAttempts: number;            // failed verification attempts
+  lastVerificationSentAt?: string;         // timestamp of last OTP/token sent
   // Residence location (separate from complaint locations)
   stateId?: string;
   districtId?: string;

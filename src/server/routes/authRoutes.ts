@@ -2,9 +2,12 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, getJwtSecret, logIpSecurityEvent } from '../middleware/auth.js';
 import { User, AuthEventType } from '../../types/scip.js';
+import { emailService } from '../../services/emailService.js';
+import { smsService } from '../../services/smsService.js';
 
 const router = Router();
 
@@ -71,7 +74,8 @@ router.post('/register', async (req, res: Response): Promise<void> => {
       localityId: typeof localityId === 'string' ? localityId : undefined,
       pinCode: typeof pinCode === 'string' && /^[1-9][0-9]{5}$/.test(pinCode) ? pinCode : undefined,
       residenceAddress: typeof residenceAddress === 'string' ? residenceAddress.trim().slice(0, 500) : undefined,
-      status: 'active', sessionVersion: 0, credentialsResetRequired: false
+      status: 'unverified', sessionVersion: 0, credentialsResetRequired: false,
+      emailVerified: false, phoneVerified: false, verificationAttempts: 0
     } as any);
     await db.logAudit({
       action: 'REGISTER', module: 'auth', userId: newUser.id, userEmail: newUser.email,
@@ -82,9 +86,37 @@ router.post('/register', async (req, res: Response): Promise<void> => {
     await logIpSecurityEvent({
       req, eventType: 'REGISTER', success: true,
       userId: newUser.id, userEmail: newUser.email, userRole: 'citizen',
-      details: 'Public registration completed as citizen'
+      details: 'Public registration completed as citizen (unverified)'
     });
-    res.status(201).json({ success: true, message: 'Registration successful.', data: { user: sanitizeAuthUser(newUser), token } });
+
+    // Trigger email verification for new unverified account
+    try {
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(verificationToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await db.setUserEmailVerificationToken(newUser.id, tokenHash, expiresAt);
+      await db.updateUserVerificationStatus(newUser.id, {
+        lastVerificationSentAt: new Date().toISOString()
+      });
+      const verificationLink = `${process.env.APP_BASE_URL || 'http://localhost:3000'}/verify-email?token=${verificationToken}&email=${encodeURIComponent(safeEmail)}`;
+      await emailService.sendEmail({
+        to: safeEmail,
+        subject: 'SCIP - Verify Your Email Address',
+        htmlBody: `
+          <h2>Verify your SCIP account</h2>
+          <p>Hello ${safeName},</p>
+          <p>Please verify your email address by clicking the link below:</p>
+          <p><a href="${verificationLink}">Verify Email</a></p>
+          <p>This link expires in 24 hours.</p>
+          <p>If you did not request this, you can safely ignore this email.</p>
+        `,
+        textBody: `Hello ${safeName},\nPlease verify your email address by visiting: ${verificationLink}\nThis link expires in 24 hours.\nIf you did not request this, you can safely ignore this email.`
+      });
+    } catch {
+      // Email delivery failure should not block registration
+    }
+
+    res.status(201).json({ success: true, message: 'Registration successful. Please verify your email address to activate your account.', data: { user: sanitizeAuthUser(newUser), token } });
   } catch (err: any) {
     res.status(500).json({ success: false, message: 'Failed to complete registration.', errors: [process.env.NODE_ENV === 'production' ? 'Registration failed.' : err.message] });
   }

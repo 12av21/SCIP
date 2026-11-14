@@ -1136,5 +1136,76 @@ export class MongoScipRepository implements IScipRepository {
 
   // --- Data Deletion (not parity integrated) ---
   deleteUser() { return notParity('deleteUser'); }
+
+  // --- Email & SMS Verification (MongoDB parity) ---
+  async setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string): Promise<void> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) throw new Error('User not found');
+    await UserModel.updateOne({ id: userId }, { $set: { emailVerificationTokenHash: tokenHash, emailVerificationTokenExpiresAt: expiresAt, updatedAt: nowIso() } });
+  }
+
+  async setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string): Promise<void> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) throw new Error('User not found');
+    await UserModel.updateOne({ id: userId }, { $set: { phoneVerificationOtpHash: otpHash, phoneVerificationOtpExpiresAt: expiresAt, updatedAt: nowIso() } });
+  }
+
+  async verifyUserEmail(userId: string, token: string): Promise<boolean> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) return false;
+    if (!user.emailVerificationTokenHash || !user.emailVerificationTokenExpiresAt) return false;
+    if (new Date(user.emailVerificationTokenExpiresAt) < new Date()) return false;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    if (tokenHash !== user.emailVerificationTokenHash) return false;
+    await UserModel.updateOne({ id: userId }, { $set: { emailVerified: true, emailVerificationTokenHash: undefined, emailVerificationTokenExpiresAt: undefined, verificationAttempts: 0, updatedAt: nowIso() } });
+    return true;
+  }
+
+  async verifyUserPhone(userId: string, otp: string): Promise<boolean> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) return false;
+    if (!user.phoneVerificationOtpHash || !user.phoneVerificationOtpExpiresAt) return false;
+    if (new Date(user.phoneVerificationOtpExpiresAt) < new Date()) return false;
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    if (otpHash !== user.phoneVerificationOtpHash) return false;
+    await UserModel.updateOne({ id: userId }, { $set: { phoneVerified: true, phoneVerificationOtpHash: undefined, phoneVerificationOtpExpiresAt: undefined, verificationAttempts: 0, updatedAt: nowIso() } });
+    return true;
+  }
+
+  async getUserVerificationStatus(userId: string): Promise<{ emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) return undefined;
+    return {
+      emailVerified: !!user.emailVerified,
+      phoneVerified: !!user.phoneVerified,
+      emailVerificationTokenExpiresAt: user.emailVerificationTokenExpiresAt,
+      phoneVerificationOtpExpiresAt: user.phoneVerificationOtpExpiresAt,
+      verificationAttempts: user.verificationAttempts ?? 0,
+      lastVerificationSentAt: user.lastVerificationSentAt
+    };
+  }
+
+  async incrementVerificationAttempts(userId: string): Promise<void> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) return;
+    await UserModel.updateOne({ id: userId }, { $set: { verificationAttempts: (user.verificationAttempts ?? 0) + 1, updatedAt: nowIso() } });
+  }
+
+  async resetVerificationAttempts(userId: string): Promise<void> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) return;
+    await UserModel.updateOne({ id: userId }, { $set: { verificationAttempts: 0, updatedAt: nowIso() } });
+  }
+
+  async updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }): Promise<void> {
+    const user: any = await UserModel.findOne({ id: userId }).lean();
+    if (!user) throw new Error('User not found');
+    const patch: any = { updatedAt: nowIso() };
+    if (updates.emailVerified !== undefined) patch.emailVerified = updates.emailVerified;
+    if (updates.phoneVerified !== undefined) patch.phoneVerified = updates.phoneVerified;
+    if (updates.verificationAttempts !== undefined) patch.verificationAttempts = updates.verificationAttempts;
+    if (updates.lastVerificationSentAt !== undefined) patch.lastVerificationSentAt = updates.lastVerificationSentAt;
+    await UserModel.updateOne({ id: userId }, { $set: patch });
+  }
 }
 

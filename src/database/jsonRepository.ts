@@ -128,4 +128,14 @@ export class JsonScipRepository implements IScipRepository {
   listBackups(backupDir?: string) { return this.engine.listBackups(backupDir); }
   pruneBackups(retentionCount: number, backupDir?: string) { return this.engine.pruneBackups(retentionCount, backupDir); }
   restoreFromBackup(backupFile: string, storageFile?: string) { return SCIPDatabase.restoreFromBackup(backupFile, storageFile); }
+
+  // --- Email & SMS Verification ---
+  setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string) { return this.engine.setUserEmailVerificationToken(userId, tokenHash, expiresAt); }
+  setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string) { return this.engine.setUserPhoneVerificationOtp(userId, otpHash, expiresAt); }
+  verifyUserEmail(userId: string, token: string) { return this.engine.verifyUserEmail(userId, token); }
+  verifyUserPhone(userId: string, otp: string) { return this.engine.verifyUserPhone(userId, otp); }
+  getUserVerificationStatus(userId: string) { return this.engine.getUserVerificationStatus(userId); }
+  incrementVerificationAttempts(userId: string) { return this.engine.incrementVerificationAttempts(userId); }
+  resetVerificationAttempts(userId: string) { return this.engine.resetVerificationAttempts(userId); }
+  updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }) { return this.engine.updateUserVerificationStatus(userId, updates); }
 }

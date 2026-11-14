@@ -496,6 +496,9 @@ export class SCIPDatabase {
       ...userData,
       sessionVersion: (userData as any).sessionVersion ?? 0,
       credentialsResetRequired: Boolean((userData as any).credentialsResetRequired),
+      emailVerified: Boolean((userData as any).emailVerified),
+      phoneVerified: Boolean((userData as any).phoneVerified),
+      verificationAttempts: (userData as any).verificationAttempts ?? 0,
       id,
       createdAt: now,
       updatedAt: now
@@ -632,6 +635,98 @@ export class SCIPDatabase {
 
     const { passwordHash, ...safe } = user;
     return safe as User;
+  }
+
+  // --- Email & SMS Verification (Phase: Verification Enhancement) ---
+
+  public setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    user.emailVerificationTokenHash = tokenHash;
+    user.emailVerificationTokenExpiresAt = expiresAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    user.phoneVerificationOtpHash = otpHash;
+    user.phoneVerificationOtpExpiresAt = expiresAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public verifyUserEmail(userId: string, token: string): boolean {
+    const user = this.users.get(userId);
+    if (!user) return false;
+    if (!user.emailVerificationTokenHash || !user.emailVerificationTokenExpiresAt) return false;
+    if (new Date(user.emailVerificationTokenExpiresAt) < new Date()) return false; // expired
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    if (tokenHash !== user.emailVerificationTokenHash) return false; // invalid token
+    user.emailVerified = true;
+    user.emailVerificationTokenHash = undefined;
+    user.emailVerificationTokenExpiresAt = undefined;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  public verifyUserPhone(userId: string, otp: string): boolean {
+    const user = this.users.get(userId);
+    if (!user) return false;
+    if (!user.phoneVerificationOtpHash || !user.phoneVerificationOtpExpiresAt) return false;
+    if (new Date(user.phoneVerificationOtpExpiresAt) < new Date()) return false; // expired
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    if (otpHash !== user.phoneVerificationOtpHash) return false; // invalid OTP
+    user.phoneVerified = true;
+    user.phoneVerificationOtpHash = undefined;
+    user.phoneVerificationOtpExpiresAt = undefined;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  public getUserVerificationStatus(userId: string): { emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined {
+    const user = this.users.get(userId);
+    if (!user) return undefined;
+    return {
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified,
+      emailVerificationTokenExpiresAt: user.emailVerificationTokenExpiresAt,
+      phoneVerificationOtpExpiresAt: user.phoneVerificationOtpExpiresAt,
+      verificationAttempts: user.verificationAttempts,
+      lastVerificationSentAt: user.lastVerificationSentAt
+    };
+  }
+
+  public incrementVerificationAttempts(userId: string): void {
+    const user = this.users.get(userId);
+    if (!user) return;
+    user.verificationAttempts = (user.verificationAttempts ?? 0) + 1;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public resetVerificationAttempts(userId: string): void {
+    const user = this.users.get(userId);
+    if (!user) return;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    if (updates.emailVerified !== undefined) user.emailVerified = updates.emailVerified;
+    if (updates.phoneVerified !== undefined) user.phoneVerified = updates.phoneVerified;
+    if (updates.verificationAttempts !== undefined) user.verificationAttempts = updates.verificationAttempts;
+    if (updates.lastVerificationSentAt !== undefined) user.lastVerificationSentAt = updates.lastVerificationSentAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
   }
 
   // --- Data Deletion / Right to be Forgotten (Phase 3 / DPDP Act 2023) ---

@@ -372,6 +372,49 @@ class APIClient {
     });
   }
 
+  // --- Email & SMS Verification ---
+
+  public async sendEmailVerification(email: string) {
+    return await this.request<{ success: boolean; message: string; provider?: string; messageId?: string }>('/api/verification/send-email', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+  }
+
+  public async verifyEmail(email: string, token: string) {
+    return await this.request<{ success: boolean; message: string }>('/api/verification/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ email, token })
+    });
+  }
+
+  public async sendSmsVerification(phone: string) {
+    return await this.request<{ success: boolean; message: string; provider?: string }>('/api/verification/send-sms', {
+      method: 'POST',
+      body: JSON.stringify({ phone })
+    });
+  }
+
+  public async verifySms(phone: string, otp: string) {
+    return await this.request<{ success: boolean; message: string }>('/api/verification/verify-sms', {
+      method: 'POST',
+      body: JSON.stringify({ phone, otp })
+    });
+  }
+
+  public async getVerificationStatus() {
+    return await this.request<{ success: boolean; data: { emailVerified: boolean; phoneVerified: boolean; verificationAttempts: number; lastVerificationSentAt?: string } }>('/api/verification/status', {
+      method: 'GET'
+    });
+  }
+
+  public async resendVerification(channel: 'email' | 'sms') {
+    return await this.request<{ success: boolean; message: string }>('/api/verification/resend', {
+      method: 'POST',
+      body: JSON.stringify({ channel })
+    });
+  }
+
   public async withdrawReport(id: string) {
     const res = await this.request<{ success: boolean; data: Report }>(`/api/reports/${id}`, {
       method: 'DELETE'
