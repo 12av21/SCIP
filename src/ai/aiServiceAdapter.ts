@@ -13,7 +13,7 @@ import { findSimilarAndDuplicateReports } from './duplicateDetector.js';
 import { extractEntities } from './classifier.js';
 import { computeExplainableRisk } from './riskScorer.js';
 import { modelRegistry, SelectModelOptions } from './modelRegistry.js';
-import { Report, ReportCategory, ModelTask, ModelFramework } from '../types/scip.js';
+import { Report, ReportCategory, ModelTask, ModelFramework, UrgencyLevel, IncidentPriority } from '../types/scip.js';
 
 export interface AIClassificationResult {
   predictedCategory: ReportCategory;
@@ -70,6 +70,15 @@ function safeLog(message: string, ...args: unknown[]): void {
   if (process.env.NODE_ENV !== 'test') {
     console.log(`[SCIP AI Adapter] ${message}`, ...args);
   }
+}
+
+// The Python service returns short priority codes (P1..P4); SCIP uses P1_CRITICAL..P4_LOW.
+function normalizeIncidentPriority(raw: any): IncidentPriority {
+  const s = String(raw ?? '').toUpperCase();
+  if (s.startsWith('P1')) return 'P1_CRITICAL';
+  if (s.startsWith('P2')) return 'P2_HIGH';
+  if (s.startsWith('P3')) return 'P3_MEDIUM';
+  return 'P4_LOW';
 }
 
 export class AIServiceAdapter {
@@ -331,7 +340,7 @@ export class AIServiceAdapter {
   // ------------------------------------------------------------------
   // Duplicate detection (existing: Python or local TF-IDF + Haversine)
   // ------------------------------------------------------------------
-  public async checkDuplicates(target: Report, corpus: Report[]) {
+  public async checkDuplicates(target: Report, corpus: Report[]): Promise<ReturnType<typeof findSimilarAndDuplicateReports>> {
     if (this.isServiceEnabled()) {
       try {
         const candidates = corpus
@@ -354,13 +363,140 @@ export class AIServiceAdapter {
           })
         });
 
-        return data;
+        // Normalize the Python response to the canonical local shape so callers
+        // never have to know which engine produced it.
+        const pyMatches = Array.isArray(data?.top_similar) ? data.top_similar : [];
+        const topSimilar = pyMatches.map((m: any) => ({
+          reportId: m.id ?? m.reportId ?? '',
+          reportTitle: m.reportTitle ?? m.title ?? '',
+          category: (m.category ?? target.category) as ReportCategory,
+          similarityScore: Number(m.similarityScore ?? m.similarity_score ?? 0),
+          distanceMeters: Number(m.distanceMeters ?? m.distance_meters ?? 0),
+          timeDeltaHours: Number(m.timeDeltaHours ?? m.time_delta_hours ?? 0),
+          matchingTerms: Array.isArray(m.matchingTerms ?? m.common_terms) ? (m.matchingTerms ?? m.common_terms) : [],
+          isPotentialDuplicate: Boolean(m.isPotentialDuplicate ?? m.is_potential_duplicate ?? false),
+          duplicateScore: Number(m.duplicateScore ?? m.duplicate_score ?? m.similarity_score ?? 0)
+        }));
+        return {
+          topSimilar,
+          duplicateProbability: Number(data?.duplicate_probability ?? data?.duplicateProbability ?? 0),
+          highestMatch: topSimilar[0],
+          evidence: Array.isArray(data?.evidence) ? data.evidence : (data?.explanation ? [String(data.explanation)] : [])
+        };
       } catch {
         // Fall back to local engine
       }
     }
 
     return findSimilarAndDuplicateReports(target, corpus);
+  }
+
+  // ------------------------------------------------------------------
+  // Image analysis (Python vision service, when configured)
+  // ------------------------------------------------------------------
+  public async analyzeImage(input: { imageId: string; imageBase64: string; mimeType: string }): Promise<any | null> {
+    if (!this.isServiceEnabled()) return null;
+    try {
+      return await this.fetchWithTimeout(`${this.config.baseUrl}/analyze-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: input.imageId, image_base64: input.imageBase64, mime_type: input.mimeType })
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Named Entity Recognition (Python or local rule-based)
+  // ------------------------------------------------------------------
+  public async ner(text: string) {
+    if (this.isServiceEnabled()) {
+      try {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/ner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        return {
+          locations: Array.isArray(data?.locations) ? data.locations : [],
+          hazards: Array.isArray(data?.hazards) ? data.hazards : [],
+          infrastructure: Array.isArray(data?.infrastructure) ? data.infrastructure : [],
+          modelVersion: data?.model_version ?? 'scip-python-ner-v1.0'
+        };
+      } catch {
+        // Fall back to local engine
+      }
+    }
+
+    const local = extractEntities(text);
+    return {
+      locations: local.locations,
+      infrastructure: local.infrastructure,
+      hazards: local.hazards,
+      modelVersion: 'scip-local-ts-ner-v1.0'
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Risk Prioritization (Python or local rule-based)
+  // ------------------------------------------------------------------
+  public async prioritize(input: {
+    severity: UrgencyLevel;
+    reportCount?: number;
+    isHotspot?: boolean;
+    affectedInfrastructure?: boolean;
+  }): Promise<{ score: number; priority: IncidentPriority; explanation: string }> {
+    if (this.isServiceEnabled()) {
+      try {
+        const data = await this.fetchWithTimeout(`${this.config.baseUrl}/prioritize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input)
+        });
+        return {
+          score: Number(data?.score ?? 0),
+          priority: normalizeIncidentPriority(data?.priority),
+          explanation: String(data?.explanation ?? 'Prioritized by local engine.')
+        };
+      } catch {
+        // Fall back to local engine
+      }
+    }
+
+    const syntheticReport: Report = {
+      id: `PRIO-${Date.now().toString().slice(-4)}`,
+      title: 'Prioritization request',
+      description: '',
+      category: 'Water & Drainage',
+      locationName: 'unspecified',
+      latitude: 0,
+      longitude: 0,
+      citizenId: 'system',
+      citizenName: 'System',
+      citizenEmail: 'system@scip.internal',
+      status: 'analyzed',
+      urgency: input.severity,
+      images: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const risk = computeExplainableRisk({
+      entityType: 'incident',
+      entityId: syntheticReport.id,
+      reports: [syntheticReport],
+      locationName: syntheticReport.locationName,
+      isRecurrentHotspot: Boolean(input.isHotspot),
+      declaredUrgency: input.severity,
+      inferredUrgencyFromKeywords: undefined
+    });
+
+    return {
+      score: risk.score,
+      priority: risk.priority,
+      explanation: risk.explanation
+    };
   }
 
   // ------------------------------------------------------------------

@@ -8,7 +8,8 @@ import type {
   User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster,
   Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics,
   AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality,
-  AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel
+  AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel,
+  ClerkIdentityLink, ClerkLinkVerificationMethod
 } from '../types/scip.js';
 
 export interface IScipRepository {
@@ -27,6 +28,7 @@ export interface IScipRepository {
   getUsers(): Promise<User[]> | User[];
   getUserById(id: string): Promise<User | undefined> | User | undefined;
   getUserByEmailWithPassword(email: string): Promise<User | undefined> | User | undefined;
+  getUserByClerkId(clerkUserId: string): Promise<User | undefined> | User | undefined;
   createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> | User;
   updateUserRole(userId: string, newRole: UserRole, adminUser: User): Promise<User> | User;
   updateUserStatus(userId: string, status: 'active' | 'suspended', adminUser: User): Promise<User> | User;
@@ -35,6 +37,19 @@ export interface IScipRepository {
   changeUserPassword(userId: string, newPasswordHash: string): Promise<void> | void;
   updateUserProfile(userId: string, updates: { name?: string; phone?: string }): Promise<User> | User;
   deleteUser(userId: string, requestingUser: User): Promise<User> | User;
+
+  // clerk identity linking (Phase 3.1.3)
+  linkClerkIdentity(scipUserId: string, clerkSubject: string): Promise<{ linked: boolean; reason?: string }> | { linked: boolean; reason?: string };
+  createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }): Promise<ClerkIdentityLink> | ClerkIdentityLink;
+  getClerkLinkById(id: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
+  getClerkLinkBySubject(clerkSubject: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
+  getClerkLinksByScipUser(scipUserId: string): Promise<ClerkIdentityLink[]> | ClerkIdentityLink[];
+  listPendingClerkLinks(): Promise<ClerkIdentityLink[]> | ClerkIdentityLink[];
+  setClerkLinkChallenge(id: string, challengeHash: string, challengeSalt: string, expiresAt: string, resendCooldownUntil: string): Promise<void> | void;
+  submitClerkLinkChallenge(id: string, otp: string): Promise<{ verified: boolean; linked: boolean; reason?: string }> | { verified: boolean; linked: boolean; reason?: string };
+  decideClerkLink(id: string, decision: 'approve' | 'reject', adminUser: User, reason: string): Promise<{ linked: boolean; reason?: string }> | { linked: boolean; reason?: string };
+  cancelClerkLink(id: string, clerkSubject: string): Promise<void> | void;
+  expireStaleClerkLinks(): Promise<number> | number;
 
   // departments
   getDepartments(): Promise<Department[]> | Department[];

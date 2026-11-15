@@ -76,6 +76,18 @@ jobs:
       - name: Run security HTTP tests
         run: npx tsx scripts/security-http-test.mts
 
+      - name: Run security HTTP location tests
+        run: npx tsx scripts/security-http-test-location.mts
+
+      - name: Run security headers tests
+        run: npx tsx scripts/security-headers-test.mts
+
+      - name: Run identity infrastructure tests
+        run: npx tsx scripts/identity-infrastructure-test.mts
+
+      - name: Run Clerk linking tests
+        run: npx tsx scripts/clerk-linking-test.mts
+
   ai-tests:
     name: AI Verification Tests
     runs-on: ubuntu-latest
@@ -108,8 +120,40 @@ jobs:
       - name: Run AI verification tests
         run: npx tsx scripts/ai-verification-test.mts
 
+      - name: Run LLM agent tests
+        run: npx tsx scripts/llm-agent-test.mts
+
       - name: Run database management tests
         run: npx tsx scripts/db-management-test.mts
+
+      - name: Run AI service adapter tests
+        run: npx tsx scripts/ai-service-adapter-test.mts
+
+      - name: Run AI service shapes tests
+        run: npx tsx scripts/ai-service-shapes-test.mts
+
+      - name: Run Hindi/Hinglish NLP tests
+        run: npx tsx scripts/ai-hindi-hinglish-test.mts
+
+  frontend-tests:
+    name: Frontend Robustness Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run API client robustness tests
+        run: npx tsx scripts/frontend-api-client-test.mts
 
   docker-build:
     name: Docker Build

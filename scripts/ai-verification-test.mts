@@ -746,7 +746,9 @@ const agentQueries = [
 ];
 
 for (const c of agentQueries) {
-  const { result, durationMs } = timeIt(() => agent.executeIntelligenceQuery(c.query));
+  const agentStart = performance.now();
+  const result = await agent.executeIntelligenceQuery(c.query);
+  const durationMs = Number((performance.now() - agentStart).toFixed(2));
   const hasExpectedTool = result.toolResults.some((t: any) => t.toolName === c.expectedTool);
   const pass = result.executiveSummary.length > 0 && result.toolResults.length > 0;
   addResult(
@@ -760,7 +762,9 @@ for (const c of agentQueries) {
 }
 
 // Specific tool execution
-const { result: specTool, durationMs: specDur } = timeIt(() => agent.executeIntelligenceQuery('test', 'clustering'));
+const specStart = performance.now();
+const specTool = await agent.executeIntelligenceQuery('test', 'clustering');
+const specDur = Number((performance.now() - specStart).toFixed(2));
 addResult('AI Agent', 'Specific tool: clustering', 'specificTool=clustering', 'Returns clustering tool result',
   { toolName: specTool.toolResults[0]?.toolName, status: specTool.toolResults[0]?.status },
   specDur, specTool.toolResults[0]?.toolName === 'Incident Clustering Tool');
@@ -771,9 +775,9 @@ addResult('AI Agent', 'Specific tool: clustering', 'specificTool=clustering', 'R
 
 console.log('\n=== TEST 10: AI-Generated Summaries ===\n');
 
-const { result: briefing, durationMs: briefDur } = timeIt(() =>
-  agent.executeIntelligenceQuery('most frequently reported problem')
-);
+const briefStart = performance.now();
+const briefing = await agent.executeIntelligenceQuery('most frequently reported problem');
+const briefDur = Number((performance.now() - briefStart).toFixed(2));
 const hasSummary = briefing.executiveSummary.length > 0;
 const hasDisclaimer = briefing.uncertaintyDisclaimer.includes('RESPONSIBLE-AI');
 addResult(
@@ -807,9 +811,9 @@ const newReportInput = {
   citizenEmail: 'e2e@test.in'
 };
 
-const { result: createdReport, durationMs: e2eDur } = timeIt(() =>
-  e2eDb.createReport({ ...newReportInput } as any)
-);
+const e2eStart = performance.now();
+const createdReport = await e2eDb.createReport({ ...newReportInput } as any);
+const e2eDur = Number((performance.now() - e2eStart).toFixed(2));
 
 const analysis = e2eDb.getAIAnalysisForReport(createdReport.report.id);
 const reportPersisted = Boolean(e2eDb.getReportById(createdReport.report.id));
@@ -831,9 +835,9 @@ addResult(
 );
 
 // Verify the analysis matches re-analysis
-const { result: reanalyzed, durationMs: reDur } = timeIt(() =>
-  e2eDb.runAndStoreAIAnalysis(createdReport.report, true)
-);
+const reStart = performance.now();
+const reanalyzed = await e2eDb.runAndStoreAIAnalysis(createdReport.report, true);
+const reDur = Number((performance.now() - reStart).toFixed(2));
 addResult(
   'Integration', 'Re-analysis produces consistent results',
   { reportId: createdReport.report.id },

@@ -37,7 +37,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccessNavigate
 }) => {
-  const { login, register, switchDemoRole, emailVerified, phoneVerified, sendEmailVerification, verifyEmail, sendSmsVerification, verifySms, resendVerification } = useAuth();
+  const { login, register, emailVerified, phoneVerified, sendSmsVerification, verifySms, resendVerification } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode);
 
   // Login Form States
@@ -55,8 +55,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [agreeTerms, setAgreeTerms] = useState(false);
 
   // Verification States
-  const [verifyEmailInput, setVerifyEmailInput] = useState('');
-  const [verifyEmailToken, setVerifyEmailToken] = useState('');
   const [verifyPhoneInput, setVerifyPhoneInput] = useState('');
   const [verifyOtpInput, setVerifyOtpInput] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -117,7 +115,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await login(loginEmail, loginPassword);
+      await login();
       onClose();
       const emailLower = loginEmail.toLowerCase();
       if (emailLower.includes('admin')) {
@@ -173,15 +171,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await register({
-        name: signupName,
-        email: signupEmail,
-        password: signupPassword,
-        phone: signupPhone || undefined
-      });
-      setSuccessMessage('Registration successful. Please verify your email address to activate your account.');
-      setMode('verify-email');
-      setVerifyEmailInput(signupEmail);
+      await register();
+      setSuccessMessage('Registration successful. Please verify your email address via Clerk.');
+      onClose();
     } catch (err: any) {
       setErrorMessage(err.message || 'Registration failed. An account with this email may already exist.');
     } finally {
@@ -190,54 +182,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   // --- Verification handlers ---
-
-  const handleSendEmailVerification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(verifyEmailInput)) {
-      setErrorMessage('Please enter a valid email address.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await sendEmailVerification(verifyEmailInput);
-      setSuccessMessage('Verification email sent. Please check your inbox.');
-      setMode('verify-email');
-      setResendChannel('email');
-      setResendCooldown(60);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to send verification email.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    if (!verifyEmailToken.trim()) {
-      setErrorMessage('Please enter the verification token.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await verifyEmail(verifyEmailInput, verifyEmailToken);
-      setSuccessMessage('Email verified successfully! You can now sign in.');
-      setMode('login');
-      setLoginEmail(verifyEmailInput);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Invalid or expired verification token.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSendSmsVerification = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -323,25 +267,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <AlertCircle className="w-3 h-3" /> Verification Required
       </span>
     );
-  };
-
-  const handleQuickDemoLogin = async (role: UserRole) => {
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      await switchDemoRole(role);
-      onClose();
-      navigateForRole(role);
-    } catch (err: any) {
-      const msg = err?.message || 'Development demo login is unavailable.';
-      setErrorMessage(
-        msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('disabled')
-          ? 'Demo role login is disabled. Use your assigned account credentials.'
-          : msg
-      );
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (
@@ -502,68 +427,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </button>
 
-              {/* Quick Persona Switcher */}
-              <div className="pt-4 mt-4 border-t border-[#DCE3EA]">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[#657586] mb-2 flex items-center justify-between">
-                  <span>Evaluation & Demo Quick-Login</span>
-                  <span className="text-[10px] text-[#1F5F91] font-semibold">1-Click Role Switch</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('citizen')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">Citizen</div>
-                    <div className="text-[10px] text-[#657586]">Priya Sharma</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('officer')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">Field Officer</div>
-                    <div className="text-[10px] text-[#657586]">Er. Vikram Sharma</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('dept_officer')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">Dept Desk</div>
-                    <div className="text-[10px] text-[#657586]">Er. Sunita Patel</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('analyst')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">Data Analyst</div>
-                    <div className="text-[10px] text-[#657586]">Dr. Kavita Rao</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('authority')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">Authority Dir</div>
-                    <div className="text-[10px] text-[#657586]">Dr. Rajesh Gupta</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('admin')}
-                    className="p-2 rounded-md border border-[#DCE3EA] hover:border-[#1F5F91] hover:bg-[#EAF2F8] text-left transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-[#153E63]">System Admin</div>
-                    <div className="text-[10px] text-[#657586]">Adarsh Verma</div>
-                  </button>
-                </div>
-              </div>
             </form>
           )}
 
@@ -658,113 +521,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </>
                 )}
               </button>
-            </form>
-          )}
-
-          {/* MODE: EMAIL VERIFICATION SEND */}
-          {mode === 'email-otp' && (
-            <form onSubmit={handleSendEmailVerification} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#253443] mb-1">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    value={verifyEmailInput}
-                    onChange={e => setVerifyEmailInput(e.target.value)}
-                    placeholder="name@example.com"
-                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
-                  />
-                </div>
-              </div>
-              <p className="text-[10px] text-[#657586]">
-                We'll send a verification link to your email address.
-              </p>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer mt-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Sending...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Send Verification Email</span>
-                    <Send className="w-3 h-3" />
-                  </>
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* MODE: EMAIL VERIFY */}
-          {mode === 'verify-email' && (
-            <form onSubmit={handleVerifyEmail} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#253443] mb-1">
-                  Verification Token
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    value={verifyEmailToken}
-                    onChange={e => setVerifyEmailToken(e.target.value)}
-                    placeholder="Paste verification link token here"
-                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
-                  />
-                </div>
-              </div>
-              <p className="text-[10px] text-[#657586]">
-                Check your email for the verification link and paste the token here.
-              </p>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer mt-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Verifying...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Verify Email</span>
-                    <Check className="w-3 h-3" />
-                  </>
-                )}
-              </button>
-              <div className="pt-2 mt-2 border-t border-[#DCE3EA] flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setMode('login'); setErrorMessage(null); }}
-                  className="text-xs text-[#657586] hover:text-[#153E63]"
-                >
-                  Back to Sign In
-                </button>
-                {resendChannel === 'email' && resendCooldown > 0 && (
-                  <span className="text-[10px] text-[#657586]">
-                    Resend in {resendCooldown}s
-                  </span>
-                )}
-                {resendChannel === 'email' && resendCooldown === 0 && (
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    className="text-xs text-[#1F5F91] hover:text-[#153E63] underline"
-                  >
-                    Resend verification email
-                  </button>
-                )}
-              </div>
             </form>
           )}
 

@@ -1,34 +1,47 @@
 // SCIP Backend - Authentication & RBAC Middleware
+// Clerk-based authentication (Phase 3.1). Clerk is the Identity Provider;
+// SCIP remains the application data source and RBAC authority.
 
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import { verifyToken } from '@clerk/backend';
 import { db } from '../../database/index.js';
+import { isDuplicateClerkIdentityError } from '../../database/identityErrors.js';
 import { User, UserPermission, UserRole, AuthEventType } from '../../types/scip.ts';
 
-const MIN_JWT_SECRET_LENGTH = 32;
-let cachedSecret: string | null = null;
+const MIN_CLERK_SECRET_LENGTH = 32;
+let clerkInitialized = false;
 
-export function getJwtSecret(): string {
-  if (cachedSecret) return cachedSecret;
-  const secret = process.env.JWT_SECRET;
-  const isProduction = process.env.NODE_ENV === 'production';
-  if (!secret || secret.trim().length < MIN_JWT_SECRET_LENGTH) {
-    if (isProduction) {
-      throw new Error('JWT_SECRET is required in production and must be at least 32 characters.');
-    }
-    // Development/test fallback: explicit, non-production only. Never use in production.
-    if (!secret || !secret.trim()) {
-      cachedSecret = 'scip-dev-only-jwt-secret-do-not-use-in-production-32ch';
-      return cachedSecret;
-    }
-  }
-  cachedSecret = secret!.trim();
-  return cachedSecret;
+/**
+ * Optional authorized-party (azp) allowlist for Clerk token verification.
+ * When CLERK_AUTHORIZED_PARTIES is set (comma-separated origins), tokens whose
+ * `azp` claim is not in the list are rejected, preventing cross-application token
+ * replay. When unset, verification behavior is unchanged (backward compatible).
+ */
+function getAuthorizedParties(): string[] {
+  return (process.env.CLERK_AUTHORIZED_PARTIES || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-export function validateJwtConfigOnStartup(): void {
-  // Fail closed in production if secret missing/weak.
-  getJwtSecret();
+function verifyClerkToken(token: string) {
+  const authorizedParties = getAuthorizedParties();
+  const opts = authorizedParties.length > 0 ? { authorizedParties } : {};
+  return verifyToken(token, opts);
+}
+
+export function validateClerkConfigOnStartup(): void {
+  // Fail closed in production if Clerk secret missing/weak.
+  const secret = process.env.CLERK_SECRET_KEY;
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!secret || secret.trim().length < MIN_CLERK_SECRET_LENGTH) {
+    if (isProduction) {
+      throw new Error('CLERK_SECRET_KEY is required in production and must be at least 32 characters.');
+    }
+    clerkInitialized = false;
+    return;
+  }
+  clerkInitialized = true;
 }
 
 const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
@@ -159,10 +172,25 @@ export function hasPermission(role: UserRole, permission: UserPermission): boole
 
 export interface AuthenticatedRequest extends Request {
   user?: User;
+  clerkSubject?: string;
+  clerkEmail?: string;
 }
 export const AuthenticatedRequest = {} as any;
 
 export async function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  if (!clerkInitialized && process.env.NODE_ENV === 'production') {
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_FAILED', success: false,
+      details: 'Clerk not configured for production'
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Authentication service unavailable.',
+      errors: ['Authentication service unavailable.']
+    });
+    return;
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     await logIpSecurityEvent({
@@ -178,20 +206,41 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
   }
 
   const token = authHeader.split(' ')[1];
+
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as { id: string; email: string; role?: string; sv?: number };
-    const user = await db.getUserById(decoded.id);
+    const clerk = await verifyClerkToken(token);
+
+    if (!clerk?.sub) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        details: 'Missing or invalid Clerk authentication token'
+      });
+      res.status(401).json({
+        success: false,
+        message: 'Authentication token required.',
+        errors: ['Missing or invalid authentication token.']
+      });
+      return;
+    }
+
+    const clerkUserId = clerk.sub;
+
+    // Phase 3.1.2A: resolve identity ONLY via Clerk sub -> getUserByClerkId.
+    // The previous unverified email fallback was removed: it matched accounts by
+    // unverified email, never persisted the link, and created an account-takeover
+    // risk if ever activated. Unlinked Clerk identities are rejected (401 below).
+    const user = await db.getUserByClerkId(clerkUserId);
 
     if (!user) {
       await logIpSecurityEvent({
         req, eventType: 'LOGIN_FAILED', success: false,
-        userId: decoded.id, userEmail: decoded.email,
-        details: 'User no longer exists or session is invalid'
+        userId: clerkUserId,
+        details: 'No SCIP user record linked to Clerk account'
       });
       res.status(401).json({
         success: false,
-        message: 'User no longer exists or session is invalid.',
-        errors: ['Invalid user session.']
+        message: 'No account found linked to this Clerk identity. Please contact your administrator.',
+        errors: ['Account not linked.']
       });
       return;
     }
@@ -210,20 +259,6 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
       return;
     }
 
-    if (typeof decoded.sv === 'number' && typeof user.sessionVersion === 'number' && decoded.sv !== user.sessionVersion) {
-      await logIpSecurityEvent({
-        req, eventType: 'LOGIN_FAILED', success: false,
-        userId: user.id, userEmail: user.email, userRole: user.role,
-        details: 'Session revoked'
-      });
-      res.status(401).json({
-        success: false,
-        message: 'Session is no longer valid. Please sign in again.',
-        errors: ['Session revoked.']
-      });
-      return;
-    }
-
     if (user.credentialsResetRequired) {
       await logIpSecurityEvent({
         req, eventType: 'LOGIN_FAILED', success: false,
@@ -238,19 +273,138 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
       return;
     }
 
-    // Successful authentication
     await logIpSecurityEvent({
       req, eventType: 'LOGIN_SUCCESS', success: true,
       userId: user.id, userEmail: user.email, userRole: user.role,
-      details: 'User authenticated successfully'
+      details: 'User authenticated via Clerk'
     });
 
     req.user = user;
     next();
   } catch (err: any) {
+    // Phase 3.1.2A: duplicate identity mappings indicate data corruption/uniqueness
+    // violation. Fail closed with a safe internal error (never leak the mapping or token).
+    if (isDuplicateClerkIdentityError(err)) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        details: 'Duplicate Clerk identity mapping detected'
+      });
+      res.status(500).json({
+        success: false,
+        message: 'Authentication could not be completed due to a server configuration issue.',
+        errors: [process.env.NODE_ENV === 'production' ? 'Internal error.' : 'Duplicate Clerk identity mapping.']
+      });
+      return;
+    }
     await logIpSecurityEvent({
       req, eventType: 'LOGIN_FAILED', success: false,
       details: 'Invalid or expired authentication session'
+    });
+    res.status(401).json({
+      success: false,
+      message: 'Invalid or expired authentication session.',
+      errors: [process.env.NODE_ENV === 'production' ? 'Authentication failed.' : (err?.message || 'Authentication failed.')]
+    });
+  }
+}
+
+/**
+ * Bootstrap-only Clerk authentication for identity linking (Phase 3.1.3).
+ *
+ * Unlike `authenticate`:
+ * - Does NOT require an existing linked SCIP user, role, or permission (bootstrap).
+ * - Identity comes ONLY from the verified Clerk `sub`; email is never accepted as an
+ *   identity and is only surfaced as informational metadata.
+ * - Suspended or credential-reset accounts are still refused.
+ * - If the Clerk identity is already linked, `req.user` is attached (best-effort).
+ * - Attaches `req.clerkSubject` for downstream linking handlers.
+ */
+export async function authenticateLinking(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  if (!clerkInitialized && process.env.NODE_ENV === 'production') {
+    res.status(500).json({
+      success: false,
+      message: 'Authentication service unavailable.',
+      errors: ['Authentication service unavailable.']
+    });
+    return;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_FAILED', success: false,
+      details: 'Missing or malformed Authorization header (linking)'
+    });
+    res.status(401).json({
+      success: false,
+      message: 'Authentication token required.',
+      errors: ['Missing or malformed Authorization header.']
+    });
+    return;
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const clerk = await verifyClerkToken(token);
+    if (!clerk?.sub) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication token required.',
+        errors: ['Missing or invalid authentication token.']
+      });
+      return;
+    }
+
+    const clerkSubject = clerk.sub;
+    req.clerkSubject = clerkSubject;
+    const emailish = (clerk as any)?.email || (clerk as any)?.email_address;
+    if (typeof emailish === 'string' && emailish.length > 0) req.clerkEmail = emailish;
+
+    // Best-effort: attach an already-linked SCIP user (never required for bootstrap).
+    const existing = await db.getUserByClerkId(clerkSubject);
+    if (existing) {
+      if (existing.status === 'suspended') {
+        await logIpSecurityEvent({
+          req, eventType: 'LOGIN_FAILED', success: false,
+          userId: existing.id, userEmail: existing.email, userRole: existing.role,
+          details: 'Account suspended (linking)'
+        });
+        res.status(403).json({
+          success: false,
+          message: 'Your account has been suspended by system administrators.',
+          errors: ['Account suspended.']
+        });
+        return;
+      }
+      if (existing.credentialsResetRequired) {
+        res.status(403).json({
+          success: false,
+          message: 'Credential reset required before accessing protected resources.',
+          errors: ['Credential reset required.']
+        });
+        return;
+      }
+      req.user = existing;
+    }
+
+    next();
+  } catch (err: any) {
+    if (isDuplicateClerkIdentityError(err)) {
+      await logIpSecurityEvent({
+        req, eventType: 'LOGIN_FAILED', success: false,
+        details: 'Duplicate Clerk identity mapping detected (linking)'
+      });
+      res.status(500).json({
+        success: false,
+        message: 'Authentication could not be completed due to a server configuration issue.',
+        errors: [process.env.NODE_ENV === 'production' ? 'Internal error.' : 'Duplicate Clerk identity mapping.']
+      });
+      return;
+    }
+    await logIpSecurityEvent({
+      req, eventType: 'LOGIN_FAILED', success: false,
+      details: 'Invalid or expired authentication session (linking)'
     });
     res.status(401).json({
       success: false,

@@ -154,6 +154,9 @@ export const AgentConsoleView: React.FC = () => {
               </div>
               <div className="text-xs font-mono text-[#657586] tabular-nums">
                 Synthesis Confidence: <strong className="text-[#153E63]">{(briefing.confidence * 100).toFixed(0)}%</strong>
+                {briefing.modelUsed && (
+                  <span className="ml-2 text-[10px] text-[#657586]">· engine: {briefing.modelUsed}</span>
+                )}
               </div>
             </div>
 

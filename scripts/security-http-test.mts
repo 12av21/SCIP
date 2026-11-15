@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
-import jwt from 'jsonwebtoken';
+import { register } from 'node:module';
+
+// Redirect @clerk/backend to a test shim (this test process only).
+register('./test-support/clerk-test-loader.mjs', import.meta.url);
 
 const useMongo = process.env.SCIP_TEST_DRIVER === 'mongo';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), useMongo ? 'scip-http-mongo-' : 'scip-http-'));
@@ -57,7 +60,11 @@ await seedMongoTestDb();
 
 const { createApp } = await import('../src/server/app.js');
 const { db, getDatabaseRuntimeInfo } = await import('../src/database/index.js');
-const { getJwtSecret } = await import('../src/server/middleware/auth.js');
+
+// Link every seed user to a deterministic test Clerk identity in the temp DB.
+for (const u of await db.getUsers()) {
+  if (!(u as any).clerkUserId) { await db.linkClerkIdentity(u.id, `clerk:${u.id}`); }
+}
 
 let passed = 0; let failed = 0;
 const results: string[] = [];
@@ -67,7 +74,7 @@ function ok(name: string, cond: boolean, detail = '') {
 }
 
 function tokenFor(u: any) {
-  return jwt.sign({ id: u.id, email: u.email, role: u.role, sv: u.sessionVersion ?? 0 }, getJwtSecret(), { expiresIn: '1h' });
+  return u.clerkUserId ?? `clerk:${u.id}`;
 }
 
 async function req(port: number, method: string, p: string, body?: any, token?: string) {
@@ -132,7 +139,7 @@ try {
   ok('unauthenticated GET /api/intelligence/export-csv -> 401', (await req(port, 'GET', '/api/intelligence/export-csv')).status === 401);
   ok('unauthenticated POST /api/intelligence/agent -> 401', (await req(port, 'POST', '/api/intelligence/agent', { query: 'test' })).status === 401);
   ok('invalid token -> 401', (await req(port, 'GET', '/api/reports', undefined, 'not-a-token')).status === 401);
-  ok('expired token -> 401', (await req(port, 'GET', '/api/reports', undefined, jwt.sign({ id: admin.id, email: admin.email, role: admin.role, sv: admin.sessionVersion ?? 0 }, getJwtSecret(), { expiresIn: -10 }))).status === 401);
+  ok('unknown clerk identity -> 401', (await req(port, 'GET', '/api/reports', undefined, 'clerk:USR-DOES-NOT-EXIST')).status === 401);
   ok('missing token on /api/auth/me -> 401', (await req(port, 'GET', '/api/auth/me')).status === 401);
   ok('analyst cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, analystTok)).status === 403);
   ok('officer cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, officerTok)).status === 403);
@@ -192,14 +199,9 @@ try {
 
   ok('unauthenticated /api/auth/me -> 401', (await req(port, 'GET', '/api/auth/me')).status === 401);
   ok('unauthenticated POST /api/auth/logout -> 401', (await req(port, 'POST', '/api/auth/logout')).status === 401);
-  ok('unauthenticated POST /api/auth/change-password -> 401', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'old', newPassword: 'newpassword123' })).status === 401);
+  ok('change-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'old', newPassword: 'newpassword123' })).status === 404);
   ok('unauthenticated PUT /api/auth/profile -> 401', (await req(port, 'PUT', '/api/auth/profile', { name: 'Name' })).status === 401);
-  ok('reset-password rejects missing email -> 400', (await req(port, 'POST', '/api/auth/reset-password', {})).status === 400);
-  ok('reset-password rejects invalid email type -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: 123 })).status === 400);
-  ok('reset-password rejects whitespace email -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: '   ' })).status === 400);
-  ok('reset-password rejects overly long email -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: 'a'.repeat(255) + '@x.com' })).status === 400);
-  const resetUnknown = await req(port, 'POST', '/api/auth/reset-password', { email: 'nobody-does-not-exist@example.invalid' });
-  ok('reset-password enumeration-safe for unknown email -> 200', resetUnknown.status === 200, String(resetUnknown.status));
+  ok('reset-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/reset-password', {})).status === 404);
   const meRes = await req(port, 'GET', '/api/auth/me', undefined, citizenTok);
   ok('authenticated /api/auth/me -> 200', meRes.status === 200);
   ok('/api/auth/me omits sensitive auth state', meRes.status === 200 && meRes.json?.data && !('passwordHash' in meRes.json.data) && !('sessionVersion' in meRes.json.data) && !('credentialsResetRequired' in meRes.json.data));
@@ -210,9 +212,7 @@ try {
   ok('profile update rejects empty payload -> 400', (await req(port, 'PUT', '/api/auth/profile', {}, citizenTok)).status === 400);
   ok('profile update rejects invalid name -> 400', (await req(port, 'PUT', '/api/auth/profile', { name: '' }, citizenTok)).status === 400);
   ok('profile update rejects invalid phone -> 400', (await req(port, 'PUT', '/api/auth/profile', { phone: 'x'.repeat(31) }, citizenTok)).status === 400);
-  ok('change-password rejects invalid payload -> 400', (await req(port, 'POST', '/api/auth/change-password', {}, citizenTok)).status === 400);
-  ok('change-password rejects short new password -> 400', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'wrong-old-password', newPassword: 'short' }, citizenTok)).status === 400);
-  ok('change-password rejects wrong old password -> 401', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'definitely-wrong-old-password', newPassword: 'NewPassword123!' }, citizenTok)).status === 401);
+  ok('change-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/change-password', {}, citizenTok)).status === 404);
 
   const citizenReports = await req(port, 'GET', '/api/reports', undefined, citizenTok);
   ok('citizen can list own reports -> 200', citizenReports.status === 200);
@@ -281,50 +281,10 @@ try {
   ok('dept_officer cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, deptTok)).status === 403);
   ok('analyst cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, analystTok)).status === 403);
   ok('authority cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, authorityTok)).status === 403);
-  ok('public registration rejects privileged role -> 403', (await req(port, 'POST', '/api/auth/register', { name: 'Eve', email: 'eve-test@example.com', password: 'StrongPass123!', role: 'admin' })).status === 403);
-  ok('registration validates input -> 400', (await req(port, 'POST', '/api/auth/register', { name: '', email: 'bad', password: 'short' })).status === 400);
-  ok('login rejects missing credentials -> 400', (await req(port, 'POST', '/api/auth/login', { email: '', password: '' })).status === 400);
+  ok('public registration endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/register', { name: 'Eve', email: 'eve-test@example.com', password: 'StrongPass123!', role: 'admin' })).status === 404);
+  ok('login endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/login', { email: '', password: '' })).status === 404);
 
-  // --- Auth flows: all seven seed accounts ---
-  const devAccounts: Array<{ email: string; password: string; role: string; id: string }> = [
-    { email: 'admin@scip.gov', password: 'AdminPass123!', role: 'admin', id: 'USR-ADMIN-01' },
-    { email: 'director@scip.gov', password: 'DirectorPass123!', role: 'authority', id: 'USR-AUTH-01' },
-    { email: 'dept.patel@scip.gov', password: 'DeptPass123!', role: 'dept_officer', id: 'USR-DEPT-01' },
-    { email: 'officer.sharma@scip.gov', password: 'OfficerPass123!', role: 'officer', id: 'USR-OFF-01' },
-    { email: 'analyst.rao@scip.gov', password: 'AnalystPass123!', role: 'analyst', id: 'USR-ANL-01' },
-    { email: 'citizen.jane@scip.gov', password: 'CitizenPass123!', role: 'citizen', id: 'USR-CIT-01' },
-    { email: 'citizen.rahul@scip.gov', password: 'CitizenPass123!', role: 'citizen', id: 'USR-CIT-02' }
-  ];
-
-  for (const acct of devAccounts) {
-    const loginRes = await req(port, 'POST', '/api/auth/login', { email: acct.email, password: acct.password });
-    ok(`login succeeds: ${acct.role} (${acct.email}) -> 200`, loginRes.status === 200);
-    if (loginRes.status === 200 && loginRes.json?.data?.token) {
-      const { token } = loginRes.json.data;
-      const user = loginRes.json.data?.user;
-      ok(`login response omits passwordHash: ${acct.role}`, user && user.passwordHash === undefined);
-      ok(`login response role matches: ${acct.role}`, user && user.role === acct.role);
-      ok(`login response id matches: ${acct.role}`, user && user.id === acct.id);
-      ok(`login response email matches: ${acct.role}`, user && user.email === acct.email);
-
-      const meRes = await req(port, 'GET', '/api/auth/me', undefined, token);
-      ok(`/api/auth/me works for ${acct.role} -> 200`, meRes.status === 200);
-      if (meRes.status === 200 && meRes.json?.data) {
-        ok(`/api/auth/me omits passwordHash: ${acct.role}`, meRes.json.data.passwordHash === undefined);
-        ok(`/api/auth/me role matches: ${acct.role}`, meRes.json.data.role === acct.role);
-      }
-    }
-  }
-
-  for (const acct of devAccounts) {
-    const badLogin = await req(port, 'POST', '/api/auth/login', { email: acct.email, password: 'WrongPassword123!' });
-    ok(`login rejects wrong password: ${acct.role} -> 401`, badLogin.status === 401);
-  }
-  ok('login rejects wrong password: all dev accounts -> no 200s', true);
-
-  ok('login rejects missing email -> 400', (await req(port, 'POST', '/api/auth/login', { password: 'x' })).status === 400);
-  ok('login rejects missing password -> 400', (await req(port, 'POST', '/api/auth/login', { email: 'x@y.com' })).status === 400);
-  ok('login rejects non-existent email -> 401', (await req(port, 'POST', '/api/auth/login', { email: 'nonexistent@scip.gov', password: 'AnyPass123!' })).status === 401);
+// Password login/registration/change-password are delegated to Clerk and no longer exist on the SCIP API.
 
   ok('citizen cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, citizenTok)).status === 403);
   ok('analyst cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, analystTok)).status === 403);
@@ -565,10 +525,6 @@ try {
   ok('intelligence export default type reports -> 200', defaultExport.status === 200, String(defaultExport.status));
   const incidentsExport = await req(port, 'GET', '/api/intelligence/export-csv?type=incidents', undefined, adminTok);
   ok('intelligence export incidents type -> 200', incidentsExport.status === 200, String(incidentsExport.status));
-  const victim = otherCitizen || citizen;
-  const victimOldTok = tokenFor(victim);
-  await (db as any).invalidateUserSessions(victim.id);
-  ok('revoked session token rejected -> 401', (await req(port, 'GET', '/api/reports', undefined, victimOldTok)).status === 401);
   const target = users.find((u: any) => u.role === 'officer') || admin;
   const targetTok = tokenFor(target);
   await db.updateUserStatus(target.id, 'suspended', admin);
@@ -603,7 +559,7 @@ try {
   const logoutTok = tokenFor(await db.getUserById(logoutUser.id));
   const logoutRes = await req(port, 'POST', '/api/auth/logout', {}, logoutTok);
   ok('logout succeeds -> 200', logoutRes.status === 200);
-  ok('token invalid after logout -> 401', (await req(port, 'GET', '/api/reports', undefined, logoutTok)).status === 401);
+  // Clerk tokens are stateless; server-side logout cannot revoke an already-issued token (short TTL + Clerk session revocation is the control).
 
   const health = await req(port, 'GET', '/api/health');
   ok('health endpoint -> 200', health.status === 200);

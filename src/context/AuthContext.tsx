@@ -1,4 +1,6 @@
-// SCIP - Auth Context & Permission Hooks
+// SCIP - Auth Context & Permission Hooks (Phase 3.1: Clerk migration)
+// Clerk is the Identity Provider; SCIP remains the application data source and RBAC authority.
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole, UserPermission } from '../types/scip';
 import { api } from '../services/apiClient';
@@ -8,16 +10,13 @@ interface AuthContextType {
   role: UserRole;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
-  register: (payload: { name: string; email: string; password: string; role?: UserRole; phone?: string }) => Promise<void>;
+  login: () => Promise<void>;
+  register: () => Promise<void>;
   logout: () => Promise<void>;
-  switchDemoRole: (role: UserRole) => Promise<void>;
   hasPermission: (permission: UserPermission) => boolean;
-  // Verification
+  // Verification (email via Clerk, SMS via SCIP)
   emailVerified: boolean;
   phoneVerified: boolean;
-  sendEmailVerification: (email: string) => Promise<void>;
-  verifyEmail: (email: string, token: string) => Promise<void>;
   sendSmsVerification: (phone: string) => Promise<void>;
   verifySms: (phone: string, otp: string) => Promise<void>;
   resendVerification: (channel: 'email' | 'sms') => Promise<void>;
@@ -34,7 +33,6 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'feedback.create'
   ],
   officer: [
-    // Field Officer
     'report.read',
     'incident.read',
     'incident.update',
@@ -42,7 +40,6 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'inspection.read'
   ],
   dept_officer: [
-    // Department Desk Officer
     'report.read',
     'report.update',
     'report.assign',
@@ -58,7 +55,6 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'data.export'
   ],
   analyst: [
-    // Data & AI Analyst
     'report.read',
     'incident.read',
     'analytics.read',
@@ -67,7 +63,6 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'data.export'
   ],
   authority: [
-    // Authority Director
     'user.read',
     'report.read',
     'report.update',
@@ -85,7 +80,6 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'data.export'
   ],
   admin: [
-    // Super Administrator
     'user.read',
     'user.create',
     'user.update',
@@ -114,76 +108,80 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
   ]
 };
 
+function getClerkToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const clerk = (window as any).__scip_clerk__;
+  if (clerk && typeof clerk.session?.getToken === 'function') {
+    try {
+      return clerk.session.getToken();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function fetchScipUser(): Promise<User | null> {
+  const token = getClerkToken();
+  if (!token) return null;
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data || null;
+  } catch {
+    return null;
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Verification state derived from user object
   const emailVerified = Boolean(user?.emailVerified);
   const phoneVerified = Boolean(user?.phoneVerified);
 
   useEffect(() => {
-    // Initial user load from local storage if previously authenticated
-    const storedUser = api.getStoredUser();
-    const token = api.getToken();
-    if (storedUser && token) {
-      setUser(storedUser);
-    } else {
-      setUser(null);
-    }
-    setIsLoading(false);
+    let mounted = true;
+    const loadUser = async () => {
+      const scipUser = await fetchScipUser();
+      if (mounted) {
+        setUser(scipUser);
+        setIsLoading(false);
+      }
+    };
+    loadUser();
+    return () => { mounted = false; };
   }, []);
 
-  const login = async (email: string, pass: string) => {
-    setIsLoading(true);
-    try {
-      const res = await api.login({ email, password: pass });
-      setUser(res.user);
-    } finally {
-      setIsLoading(false);
-    }
+  const login = async () => {
+    const clerk = (window as any).__scip_clerk__;
+    if (!clerk) throw new Error('Clerk not initialized');
+    await clerk.signIn();
+    const scipUser = await fetchScipUser();
+    setUser(scipUser);
   };
 
-  const register = async (payload: { name: string; email: string; password: string; role?: UserRole; phone?: string }) => {
-    setIsLoading(true);
-    try {
-      const res = await api.register(payload);
-      setUser(res.user);
-    } finally {
-      setIsLoading(false);
-    }
+  const register = async () => {
+    const clerk = (window as any).__scip_clerk__;
+    if (!clerk) throw new Error('Clerk not initialized');
+    await clerk.signUp();
+    const scipUser = await fetchScipUser();
+    setUser(scipUser);
   };
 
   const logout = async () => {
     await api.logout();
     setUser(null);
     api.setStoredUser(null);
-    api.setToken(null);
   };
 
-  const switchDemoRole = async (targetRole: UserRole) => {
-    setIsLoading(true);
-    try {
-      const res = await api.demoLogin(targetRole);
-      setUser(res.user);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // --- Verification methods ---
-
-  const sendEmailVerification = async (email: string) => {
-    await api.sendEmailVerification(email);
-  };
-
-  const verifyEmail = async (email: string, token: string) => {
-    const res = await api.verifyEmail(email, token);
-    // Refresh user data after verification
-    if (res.success) {
-      const me = await api.getStoredUser ? null : null;
-      // User will be updated on next login or via status fetch
-    }
+  const hasPermission = (permission: UserPermission): boolean => {
+    if (!user) return false;
+    const permissions = ROLE_PERMISSIONS[user.role] || [];
+    return permissions.includes(permission);
   };
 
   const sendSmsVerification = async (phone: string) => {
@@ -198,12 +196,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await api.resendVerification(channel);
   };
 
-  const hasPermission = (permission: UserPermission): boolean => {
-    if (!user) return false;
-    const permissions = ROLE_PERMISSIONS[user.role] || [];
-    return permissions.includes(permission);
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -214,12 +206,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        switchDemoRole,
         hasPermission,
         emailVerified,
         phoneVerified,
-        sendEmailVerification,
-        verifyEmail,
         sendSmsVerification,
         verifySms,
         resendVerification

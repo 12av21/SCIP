@@ -512,3 +512,58 @@ IPSecurityLogSchema.index({ timestamp: -1 });
 IPSecurityLogSchema.index({ ipAddress: 1, timestamp: -1 });
 
 export const IPSecurityLogModel = mongoose.models.IPSecurityLog || mongoose.model<IIPSecurityLogDocument>('IPSecurityLog', IPSecurityLogSchema);
+
+// ============================================================================
+// Clerk Identity Link Mongoose Schema (Phase 3.1.3 - Mongo parity scaffolding)
+// ============================================================================
+
+export interface IClerkIdentityLinkDocument extends Document {
+  id: string;
+  scipUserId: string;
+  clerkSubject: string;
+  status: string;
+  verificationMethod: string;
+  challengeHash?: string;
+  challengeSalt?: string;
+  challengeExpiresAt?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  resendCooldownUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  verifiedAt?: string;
+  linkedAt?: string;
+  expiresAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  reason?: string;
+  correlationId: string;
+}
+
+const ClerkIdentityLinkSchema = new Schema<IClerkIdentityLinkDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  scipUserId: { type: String, required: true, index: true },
+  clerkSubject: { type: String, required: true, index: true },
+  status: { type: String, required: true, index: true, enum: ['NOT_LINKED', 'PENDING_VERIFICATION', 'VERIFIED', 'LINKED', 'EXPIRED', 'REJECTED', 'REVOKED'] },
+  verificationMethod: { type: String, required: true, enum: ['ADMIN_APPROVED', 'ONE_TIME_CHALLENGE'] },
+  challengeHash: { type: String },
+  challengeSalt: { type: String },
+  challengeExpiresAt: { type: String },
+  attemptCount: { type: Number, default: 0 },
+  maxAttempts: { type: Number, default: 5 },
+  resendCooldownUntil: { type: String },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true },
+  verifiedAt: { type: String },
+  linkedAt: { type: String },
+  expiresAt: { type: String, required: true },
+  decidedBy: { type: String },
+  decidedAt: { type: String },
+  reason: { type: String },
+  correlationId: { type: String, required: true }
+});
+
+ClerkIdentityLinkSchema.index({ clerkSubject: 1, status: 1 });
+ClerkIdentityLinkSchema.index({ scipUserId: 1, status: 1 });
+
+export const ClerkIdentityLinkModel = mongoose.models.ClerkIdentityLink || mongoose.model<IClerkIdentityLinkDocument>('ClerkIdentityLink', ClerkIdentityLinkSchema);

@@ -33,7 +33,9 @@ import {
   IPSecurityLog,
   AuthEventType,
   ComplaintLocation,
-  LocationSource
+  LocationSource,
+  ClerkIdentityLink,
+  ClerkLinkVerificationMethod
 } from '../types/scip.js';
 import {
   SEED_DEPARTMENTS,
@@ -55,8 +57,10 @@ import { globalVectorizer } from '../ai/tfidf.js';
 import { findSimilarAndDuplicateReports } from '../ai/duplicateDetector.js';
 import { detectIncidentClusters } from '../ai/incidentClustering.js';
 import { computeExplainableRisk } from '../ai/riskScorer.js';
+import { aiAdapter } from '../ai/aiServiceAdapter.js';
 import { datasetManager } from '../ai/datasetManager.js';
 import { modelRegistry } from '../ai/modelRegistry.js';
+import { DuplicateClerkIdentityError } from './identityErrors.js';
 
 const DEFAULT_STORAGE_FILE = path.resolve(process.cwd(), '.scip_database.json');
 
@@ -80,6 +84,7 @@ export class SCIPDatabase {
   private adminLocalities: Map<string, AdminLocality> = new Map();
   private administrativeBoundaries: Map<string, AdministrativeBoundary> = new Map();
   private ipSecurityLogs: IPSecurityLog[] = [];
+  private clerkLinks: Map<string, ClerkIdentityLink> = new Map();
   private isPersistedToDisk: boolean = false;
   private storageFile: string;
 
@@ -110,6 +115,7 @@ export class SCIPDatabase {
           this.feedbacks = data.feedbacks || [];
           this.auditLogs = data.auditLogs || [];
           this.ipSecurityLogs = data.ipSecurityLogs || [];
+          (data.clerkLinks || []).forEach((l: ClerkIdentityLink) => this.clerkLinks.set(l.id, l));
           // Security: do not rewrite historical audit records on load. Verification is a separate operation.
           this.isPersistedToDisk = true;
 
@@ -191,7 +197,8 @@ export class SCIPDatabase {
         notifications: this.notifications,
         feedbacks: this.feedbacks,
         auditLogs: this.auditLogs,
-        ipSecurityLogs: this.ipSecurityLogs,
+ipSecurityLogs: this.ipSecurityLogs,
+        clerkLinks: Array.from(this.clerkLinks.values()),
         adminStates: Array.from(this.adminStates.values()),
         adminDistricts: Array.from(this.adminDistricts.values()),
         adminSubDistricts: Array.from(this.adminSubDistricts.values()),
@@ -484,10 +491,39 @@ export class SCIPDatabase {
     );
   }
 
+  /**
+   * Resolve a SCIP user by Clerk identity (Phase 3.1.2A hardening).
+   * - Rejects empty/undefined/null identity input (deterministic not-found).
+   * - Detects duplicate identity records and fails closed instead of returning
+   *   the first match.
+   * - Returns the full user record (including status/role) so the middleware can
+   *   enforce suspension and authorization.
+   */
+  public getUserByClerkId(clerkUserId: string): User | undefined {
+    if (typeof clerkUserId !== 'string' || clerkUserId.trim().length === 0) {
+      return undefined;
+    }
+    const matches = Array.from(this.users.values()).filter(u => u.clerkUserId === clerkUserId);
+    if (matches.length === 0) return undefined;
+    if (matches.length > 1) {
+      throw new DuplicateClerkIdentityError();
+    }
+    return matches[0];
+  }
+
   public createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): User {
     const existing = this.getUserByEmailWithPassword(userData.email);
     if (existing) {
       throw new Error(`Email ${userData.email} is already registered.`);
+    }
+
+    // Phase 3.1.2A: enforce one Clerk identity per SCIP user at creation time.
+    const requestedClerkId = (userData as any).clerkUserId;
+    if (typeof requestedClerkId === 'string' && requestedClerkId.trim().length > 0) {
+      const clash = Array.from(this.users.values()).some(u => u.clerkUserId === requestedClerkId);
+      if (clash) {
+        throw new DuplicateClerkIdentityError();
+      }
     }
 
     const id = `USR-${Date.now().toString().slice(-6)}`;
@@ -503,6 +539,10 @@ export class SCIPDatabase {
       createdAt: now,
       updatedAt: now
     };
+    // Normalize: never persist an empty/whitespace clerkUserId (equivalent to unlinked).
+    if (typeof newUser.clerkUserId !== 'string' || newUser.clerkUserId.trim().length === 0) {
+      delete newUser.clerkUserId;
+    }
 
     this.users.set(id, newUser);
 
@@ -521,6 +561,198 @@ export class SCIPDatabase {
 
     const { passwordHash, ...safe } = newUser;
     return safe as User;
+  }
+
+  // ==========================================================================
+  // Clerk Identity Linking (Phase 3.1.3)
+  // ==========================================================================
+
+  /**
+   * Atomic conditional link. Sets clerkUserId only if the target user exists, is
+   * currently unlinked, and no other user holds this Clerk identity.
+   * Single-process JSON engine: the check-then-set is synchronous (no await
+   * between check and write) so it is atomic within the Node event loop.
+   * Multi-process atomicity is NOT guaranteed by the JSON engine (documented
+   * limitation; single-process constraint enforced operationally).
+   */
+  public linkClerkIdentity(scipUserId: string, clerkSubject: string): { linked: boolean; reason?: string } {
+    if (typeof clerkSubject !== 'string' || clerkSubject.trim().length === 0) {
+      return { linked: false, reason: 'invalid_identity' };
+    }
+    const user = this.users.get(scipUserId);
+    if (!user) return { linked: false, reason: 'user_not_found' };
+    if (typeof user.clerkUserId === 'string' && user.clerkUserId.trim().length > 0) {
+      return { linked: false, reason: 'already_linked' };
+    }
+    const clash = Array.from(this.users.values()).some(u => u.id !== scipUserId && u.clerkUserId === clerkSubject);
+    if (clash) return { linked: false, reason: 'identity_taken' };
+    user.clerkUserId = clerkSubject;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return { linked: true };
+  }
+
+  public createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }): ClerkIdentityLink {
+    const user = this.users.get(input.scipUserId);
+    if (!user) throw new Error('User not found');
+    if (typeof user.clerkUserId === 'string' && user.clerkUserId.trim().length > 0) {
+      throw new Error('ALREADY_LINKED');
+    }
+    const existingForSubject = this.getClerkLinkBySubject(input.clerkSubject);
+    if (existingForSubject && (existingForSubject.status === 'PENDING_VERIFICATION' || existingForSubject.status === 'VERIFIED')) {
+      return existingForSubject; // idempotent: return the existing pending request
+    }
+    if (existingForSubject && existingForSubject.status === 'LINKED') {
+      throw new Error('IDENTITY_TAKEN');
+    }
+    const now = new Date();
+    const id = `LNK-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+    const link: ClerkIdentityLink = {
+      id,
+      scipUserId: input.scipUserId,
+      clerkSubject: input.clerkSubject,
+      status: 'PENDING_VERIFICATION',
+      verificationMethod: input.verificationMethod,
+      attemptCount: 0,
+      maxAttempts: 5,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+      correlationId: input.correlationId
+    };
+    this.clerkLinks.set(id, link);
+    this.persist();
+    return link;
+  }
+
+  public getClerkLinkById(id: string): ClerkIdentityLink | undefined {
+    return this.clerkLinks.get(id);
+  }
+
+  public getClerkLinkBySubject(clerkSubject: string): ClerkIdentityLink | undefined {
+    if (typeof clerkSubject !== 'string' || clerkSubject.trim().length === 0) return undefined;
+    const matches = Array.from(this.clerkLinks.values()).filter(l => l.clerkSubject === clerkSubject);
+    const active = matches.find(l => l.status === 'PENDING_VERIFICATION' || l.status === 'VERIFIED' || l.status === 'LINKED');
+    if (active) return active;
+    return matches.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
+  public getClerkLinksByScipUser(scipUserId: string): ClerkIdentityLink[] {
+    return Array.from(this.clerkLinks.values()).filter(l => l.scipUserId === scipUserId);
+  }
+
+  public listPendingClerkLinks(): ClerkIdentityLink[] {
+    return Array.from(this.clerkLinks.values()).filter(l => l.status === 'PENDING_VERIFICATION');
+  }
+
+  public setClerkLinkChallenge(id: string, challengeHash: string, challengeSalt: string, expiresAt: string, resendCooldownUntil: string): void {
+    const link = this.clerkLinks.get(id);
+    if (!link) return;
+    link.challengeHash = challengeHash;
+    link.challengeSalt = challengeSalt;
+    link.challengeExpiresAt = expiresAt;
+    link.resendCooldownUntil = resendCooldownUntil;
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public submitClerkLinkChallenge(id: string, otp: string): { verified: boolean; linked: boolean; reason?: string } {
+    const link = this.clerkLinks.get(id);
+    if (!link) return { verified: false, linked: false, reason: 'not_found' };
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') {
+      return { verified: false, linked: false, reason: 'invalid_state' };
+    }
+    if (link.challengeExpiresAt && new Date(link.challengeExpiresAt).getTime() < Date.now()) {
+      link.status = 'EXPIRED';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { verified: false, linked: false, reason: 'expired' };
+    }
+    if (link.attemptCount >= link.maxAttempts) {
+      link.status = 'REJECTED';
+      link.reason = 'max_attempts_exceeded';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { verified: false, linked: false, reason: 'max_attempts' };
+    }
+    const hash = crypto.createHash('sha256').update((link.challengeSalt || '') + otp).digest('hex');
+    const ok = hash === link.challengeHash;
+    link.attemptCount += 1;
+    link.updatedAt = new Date().toISOString();
+    if (!ok) {
+      if (link.attemptCount >= link.maxAttempts) {
+        link.status = 'REJECTED';
+        link.reason = 'max_attempts_exceeded';
+      }
+      this.persist();
+      return { verified: false, linked: false, reason: 'invalid_challenge' };
+    }
+    link.status = 'VERIFIED';
+    link.verifiedAt = new Date().toISOString();
+    const result = this.linkClerkIdentity(link.scipUserId, link.clerkSubject);
+    if (result.linked) {
+      link.status = 'LINKED';
+      link.linkedAt = new Date().toISOString();
+      this.persist();
+      return { verified: true, linked: true };
+    }
+    link.status = 'REJECTED';
+    link.reason = result.reason;
+    this.persist();
+    return { verified: true, linked: false, reason: result.reason };
+  }
+
+  public decideClerkLink(id: string, decision: 'approve' | 'reject', adminUser: User, reason: string): { linked: boolean; reason?: string } {
+    const link = this.clerkLinks.get(id);
+    if (!link) return { linked: false, reason: 'not_found' };
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') {
+      return { linked: false, reason: 'invalid_state' };
+    }
+    link.decidedBy = adminUser.id;
+    link.decidedAt = new Date().toISOString();
+    link.reason = reason;
+    if (decision === 'reject') {
+      link.status = 'REJECTED';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { linked: false, reason: 'rejected' };
+    }
+    const result = this.linkClerkIdentity(link.scipUserId, link.clerkSubject);
+    if (result.linked) {
+      link.status = 'LINKED';
+      link.linkedAt = new Date().toISOString();
+      this.persist();
+      return { linked: true };
+    }
+    link.status = 'REJECTED';
+    link.reason = result.reason;
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+    return { linked: false, reason: result.reason };
+  }
+
+  public cancelClerkLink(id: string, clerkSubject: string): void {
+    const link = this.clerkLinks.get(id);
+    if (!link) return;
+    if (link.clerkSubject !== clerkSubject) return;
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') return;
+    link.status = 'REVOKED';
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public expireStaleClerkLinks(): number {
+    const now = Date.now();
+    let count = 0;
+    for (const link of this.clerkLinks.values()) {
+      if ((link.status === 'PENDING_VERIFICATION' || link.status === 'VERIFIED') && new Date(link.expiresAt).getTime() < now) {
+        link.status = 'EXPIRED';
+        link.updatedAt = new Date().toISOString();
+        count++;
+      }
+    }
+    if (count > 0) this.persist();
+    return count;
   }
 
   public updateUserRole(userId: string, newRole: UserRole, adminUser: User): User {
@@ -819,10 +1051,10 @@ export class SCIPDatabase {
     return updated;
   }
 
-  public createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): {
+  public async createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<{
     report: Report;
     analysis: AIAnalysis;
-  } {
+  }> {
     const id = `REP-${new Date().getFullYear()}-${String(this.reports.size + 1).padStart(3, '0')}`;
     const now = new Date().toISOString();
 
@@ -843,7 +1075,7 @@ export class SCIPDatabase {
     });
 
     // Perform AI analysis
-    const analysis = this.runAndStoreAIAnalysis(report, true);
+    const analysis = await this.runAndStoreAIAnalysis(report, true);
 
     // Record audit event
     this.logAudit({
@@ -993,7 +1225,7 @@ export class SCIPDatabase {
     return report;
   }
 
-  public runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): AIAnalysis {
+  public async runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): Promise<AIAnalysis> {
     const allReports = Array.from(this.reports.values());
     const text = `${report.title} ${report.description} ${report.locationName}`;
 
@@ -1012,8 +1244,18 @@ export class SCIPDatabase {
       // Dataset/model registry is additive; do not fail analysis if unavailable
     }
 
-    // 1. Classification (using selected model from registry)
-    const classResult = classifyReport(text, report.category);
+    // 1. Classification (Python AI service when enabled, local TS fallback)
+    let classResult: { predictedCategory: ReportCategory; confidence: number };
+    if (aiAdapter.isServiceEnabled()) {
+      try {
+        const adapterResult = await aiAdapter.classify(text, report.category);
+        classResult = { predictedCategory: adapterResult.predictedCategory, confidence: adapterResult.confidence };
+      } catch {
+        classResult = classifyReport(text, report.category);
+      }
+    } else {
+      classResult = classifyReport(text, report.category);
+    }
 
     // Build model selection evidence
     const modelEvidence: string[] = [];
@@ -1032,9 +1274,11 @@ export class SCIPDatabase {
     // 2. Entity Extraction
     const entities = extractEntities(text);
 
-    // 3. Duplicate Detection & Similar Reports
-    const { topSimilar, duplicateProbability, evidence: dupEvidence } =
-      findSimilarAndDuplicateReports(report, allReports);
+    // 3. Duplicate Detection & Similar Reports (canonical shape from either engine)
+    const dupResult = await aiAdapter.checkDuplicates(report, allReports);
+    const topSimilar: ReturnType<typeof findSimilarAndDuplicateReports>['topSimilar'] = dupResult.topSimilar;
+    const duplicateProbability = dupResult.duplicateProbability;
+    const dupEvidence = dupResult.evidence;
 
     // 4. Incident Clustering Check
     const clusters = detectIncidentClusters(allReports);

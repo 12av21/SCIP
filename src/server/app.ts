@@ -17,9 +17,11 @@ import mapRoutes from './routes/mapRoutes';
 import imageRoutes from './routes/imageRoutes';
 import databaseRoutes from './routes/databaseRoutes';
 import indiaCivicRoutes from './routes/indiaCivicRoutes';
+import linkingRoutes from './routes/linkingRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
-import { validateJwtConfigOnStartup } from './middleware/auth.js';
+import { validateClerkConfigOnStartup } from './middleware/auth.js';
+import { buildCsp } from './csp.js';
 import { logger } from './logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,8 +34,8 @@ export interface CreateAppOptions {
 }
 
 export async function createApp(options: CreateAppOptions = {}) {
-  // Fail closed early in production if JWT config is missing/weak.
-  validateJwtConfigOnStartup();
+  // Fail closed early in production if Clerk config is missing/weak.
+  validateClerkConfigOnStartup();
 
   const app = express();
 
@@ -63,7 +65,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     if (process.env.NODE_ENV === 'production') {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'");
+      res.setHeader('Content-Security-Policy', buildCsp());
     }
     const origin = req.headers.origin;
     if (origin && corsOrigins.includes(origin)) {
@@ -128,6 +130,8 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use('/api/incidents', incidentRoutes);
   app.use('/api/intelligence', intelligenceRoutes);
   app.use('/api/admin', adminRoutes);
+  // Clerk identity linking (Phase 3.1.3): bootstrap (/api/auth/linking/*) + admin queue (/api/admin/clerk-links/*).
+  app.use('/api', linkingRoutes);
   app.use('/api/locations', locationRoutes);
   app.use('/api/iplogs', iplogRoutes);
   app.use('/api/geoanalytics', geoanalyticsRoutes);

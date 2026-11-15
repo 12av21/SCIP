@@ -15,6 +15,7 @@ import {
   UserRole,
   InspectionRecord,
   ModelEvaluationMetrics,
+  SemanticEvaluationResult,
   AdminState,
   AdminDistrict,
   AdminSubDistrict,
@@ -30,12 +31,29 @@ import {
 const TOKEN_KEY = 'scip_auth_token';
 const USER_KEY = 'scip_auth_user';
 
+// Default per-request timeout. Prevents UI spinners from hanging forever when the
+// network or backend stalls. Callers can override per request via `signal`.
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+
+function getClerkToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const clerk = (window as any).__scip_clerk__;
+  if (clerk && typeof clerk.session?.getToken === 'function') {
+    try {
+      return clerk.session.getToken();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 class APIClient {
   private token: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem(TOKEN_KEY);
+      this.token = getClerkToken() || localStorage.getItem(TOKEN_KEY);
     }
   }
 
@@ -51,8 +69,8 @@ class APIClient {
   }
 
   public getToken(): string | null {
-    if (!this.token && typeof window !== 'undefined') {
-      this.token = localStorage.getItem(TOKEN_KEY);
+    if (!this.token) {
+      this.token = getClerkToken() || (typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null);
     }
     return this.token;
   }
@@ -77,7 +95,7 @@ class APIClient {
     }
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
     const headers = new Headers(options.headers || {});
     headers.set('Content-Type', 'application/json');
 
@@ -86,10 +104,21 @@ class APIClient {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
+    // AbortController: enforce a timeout and honor any caller-supplied signal.
+    const controller = new AbortController();
+    const externalSignal = options.signal;
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const res = await fetch(endpoint, {
         ...options,
-        headers
+        headers,
+        signal: controller.signal
       });
 
       if (!res.ok) {
@@ -97,55 +126,39 @@ class APIClient {
         throw new Error(errJson.message || `Request failed with status ${res.status}`);
       }
 
-      return await res.json();
+      // Read as text first so an empty body (e.g. 204) does not throw.
+      const text = await res.text();
+      return (text ? JSON.parse(text) : ({} as T));
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // Distinguish a caller-initiated abort from an actual timeout so the UI
+        // shows the right message.
+        if (externalSignal?.aborted) {
+          throw new Error('Request aborted');
+        }
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
       throw err;
+    } finally {
+      clearTimeout(timeoutId);
+      if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
     }
   }
 
-  // --- Public API Methods ---
+  // --- Auth (Clerk-managed) ---
 
-  // Auth
-  public async register(payload: { name: string; email: string; password: string; role?: UserRole; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string }) {
-    const res = await this.request<{ success: boolean; data: { user: User; token: string } }>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    this.setToken(res.data.token);
-    this.setStoredUser(res.data.user);
-    return res.data;
-  }
-
-  // Admin-only privileged member registration (requires admin.manage)
-  public async registerPrivilegedMember(payload: { name: string; email: string; password: string; role: UserRole; phone?: string; departmentId?: string }) {
-    const res = await this.request<{ success: boolean; data: User }>('/api/admin/users', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    return res.data;
-  }
-
-  public async login(payload: { email: string; password: string }) {
-    const res = await this.request<{ success: boolean; data: { user: User; token: string } }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    this.setToken(res.data.token);
-    this.setStoredUser(res.data.user);
-    return res.data;
-  }
-
-  public async demoLogin(role: UserRole) {
-    const res = await this.request<{ success: boolean; data: { user: User; token: string } }>('/api/auth/demo-login', {
-      method: 'POST',
-      body: JSON.stringify({ role })
-    });
-    this.setToken(res.data.token);
-    this.setStoredUser(res.data.user);
-    return res.data;
-  }
+  // Clerk handles registration via <SignUp /> or Clerk-hosted pages.
+  // SCIP does not expose password-based registration.
 
   public async logout() {
+    try {
+      const clerk = (window as any).__scip_clerk__;
+      if (clerk && typeof clerk.signOut === 'function') {
+        await clerk.signOut();
+      }
+    } catch {
+      // Ignore Clerk sign-out errors
+    }
     try {
       await this.request('/api/auth/logout', { method: 'POST' });
     } catch {
@@ -349,13 +362,6 @@ class APIClient {
     return res.data;
   }
 
-  public async changePassword(payload: { oldPassword: string; newPassword: string }) {
-    return await this.request<{ success: boolean; message: string }>('/api/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-  }
-
   public async updateProfile(payload: { name?: string; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string }) {
     const res = await this.request<{ success: boolean; data: User }>('/api/auth/profile', {
       method: 'PUT',
@@ -365,28 +371,7 @@ class APIClient {
     return res.data;
   }
 
-  public async resetPassword(email: string) {
-    return await this.request<{ success: boolean; message: string; meta?: any }>('/api/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    });
-  }
-
-  // --- Email & SMS Verification ---
-
-  public async sendEmailVerification(email: string) {
-    return await this.request<{ success: boolean; message: string; provider?: string; messageId?: string }>('/api/verification/send-email', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    });
-  }
-
-  public async verifyEmail(email: string, token: string) {
-    return await this.request<{ success: boolean; message: string }>('/api/verification/verify-email', {
-      method: 'POST',
-      body: JSON.stringify({ email, token })
-    });
-  }
+  // --- SMS Verification ---
 
   public async sendSmsVerification(phone: string) {
     return await this.request<{ success: boolean; message: string; provider?: string }>('/api/verification/send-sms', {
@@ -412,6 +397,48 @@ class APIClient {
     return await this.request<{ success: boolean; message: string }>('/api/verification/resend', {
       method: 'POST',
       body: JSON.stringify({ channel })
+    });
+  }
+
+  // --- Clerk Identity Linking (Phase 3.1.3) ---
+
+  public async requestAccountLink(payload: { email?: string; scipUserId?: string; verificationMethod: 'ADMIN_APPROVED' | 'ONE_TIME_CHALLENGE' }) {
+    return await this.request<{ success: boolean; message: string }>('/api/auth/linking/request', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  public async getAccountLinkStatus() {
+    return await this.request<{ success: boolean; data: { status: string; id?: string; verificationMethod?: string; challengePending?: boolean; challengeExpiresAt?: string; attemptsRemaining?: number; expiresAt?: string; user?: { id: string; name: string; email: string; role: string; status: string } } }>('/api/auth/linking/status', {
+      method: 'GET'
+    });
+  }
+
+  public async submitAccountLinkChallenge(id: string, otp: string) {
+    return await this.request<{ success: boolean; message: string; data?: { linked: boolean } }>('/api/auth/linking/challenge', {
+      method: 'POST',
+      body: JSON.stringify({ id, otp })
+    });
+  }
+
+  public async cancelAccountLink(id: string) {
+    return await this.request<{ success: boolean; message: string }>('/api/auth/linking/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ id })
+    });
+  }
+
+  public async getPendingAccountLinks() {
+    return await this.request<{ success: boolean; data: any[]; meta?: { total: number } }>('/api/admin/clerk-links/pending', {
+      method: 'GET'
+    });
+  }
+
+  public async decideAccountLink(id: string, decision: 'approve' | 'reject', reason?: string) {
+    return await this.request<{ success: boolean; message: string; data?: any }>(`/api/admin/clerk-links/${id}/${decision}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
     });
   }
 
@@ -668,6 +695,13 @@ class APIClient {
     return res.data;
   }
 
+  public async getSemanticEvaluation() {
+    const res = await this.request<{ success: boolean; data: SemanticEvaluationResult }>(
+      '/api/intelligence/semantic-evaluation'
+    );
+    return res.data;
+  }
+
   // --- Image Intelligence ---
 
   public async uploadImage(payload: {
@@ -697,15 +731,23 @@ class APIClient {
   }
 
   public async getImage(imageId: string): Promise<{ buffer: ArrayBuffer; mimeType: string } | null> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
     try {
+      const token = this.getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(`/api/image/${encodeURIComponent(imageId)}`, {
-        headers: { Authorization: `Bearer ${this.getToken()}` }
+        headers,
+        signal: controller.signal
       });
       if (!res.ok) return null;
       const buffer = await res.arrayBuffer();
       return { buffer, mimeType: res.headers.get('Content-Type') || 'application/octet-stream' };
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }

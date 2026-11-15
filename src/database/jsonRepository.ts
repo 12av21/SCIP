@@ -5,7 +5,7 @@
  */
 import { SCIPDatabase } from './scipDatabase.js';
 import type { IScipRepository } from './repository.js';
-import type { User, UserRole, Report, Incident, AuditLog, Notification, Feedback, InspectionRecord, SpatioTemporalCluster, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel } from '../types/scip.js';
+import type { User, UserRole, Report, Incident, AuditLog, Notification, Feedback, InspectionRecord, SpatioTemporalCluster, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel, ClerkIdentityLink, ClerkLinkVerificationMethod } from '../types/scip.js';
 
 export class JsonScipRepository implements IScipRepository {
   readonly engine: SCIPDatabase;
@@ -27,6 +27,19 @@ export class JsonScipRepository implements IScipRepository {
   getUsers() { return this.engine.getUsers(); }
   getUserById(id: string) { return this.engine.getUserById(id); }
   getUserByEmailWithPassword(email: string) { return this.engine.getUserByEmailWithPassword(email); }
+  getUserByClerkId(clerkUserId: string) { return this.engine.getUserByClerkId(clerkUserId); }
+  // --- Clerk Identity Linking (Phase 3.1.3) ---
+  linkClerkIdentity(scipUserId: string, clerkSubject: string) { return this.engine.linkClerkIdentity(scipUserId, clerkSubject); }
+  createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }) { return this.engine.createClerkLinkRequest(input); }
+  getClerkLinkById(id: string) { return this.engine.getClerkLinkById(id); }
+  getClerkLinkBySubject(clerkSubject: string) { return this.engine.getClerkLinkBySubject(clerkSubject); }
+  getClerkLinksByScipUser(scipUserId: string) { return this.engine.getClerkLinksByScipUser(scipUserId); }
+  listPendingClerkLinks() { return this.engine.listPendingClerkLinks(); }
+  setClerkLinkChallenge(id: string, challengeHash: string, challengeSalt: string, expiresAt: string, resendCooldownUntil: string) { return this.engine.setClerkLinkChallenge(id, challengeHash, challengeSalt, expiresAt, resendCooldownUntil); }
+  submitClerkLinkChallenge(id: string, otp: string) { return this.engine.submitClerkLinkChallenge(id, otp); }
+  decideClerkLink(id: string, decision: 'approve' | 'reject', adminUser: User, reason: string) { return this.engine.decideClerkLink(id, decision, adminUser, reason); }
+  cancelClerkLink(id: string, clerkSubject: string) { return this.engine.cancelClerkLink(id, clerkSubject); }
+  expireStaleClerkLinks() { return this.engine.expireStaleClerkLinks(); }
   createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) { return this.engine.createUser(userData); }
   updateUserRole(userId: string, newRole: UserRole, adminUser: User) { return this.engine.updateUserRole(userId, newRole, adminUser); }
   updateUserStatus(userId: string, status: 'active' | 'suspended', adminUser: User) { return this.engine.updateUserStatus(userId, status, adminUser); }
@@ -46,7 +59,7 @@ export class JsonScipRepository implements IScipRepository {
   createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>) { return this.engine.createReport(reportInput); }
   updateReport(id: string, updates: Partial<Report>, user: User) { return this.engine.updateReport(id, updates, user); }
   withdrawReport(id: string, user: User) { return this.engine.withdrawReport(id, user); }
-  runAndStoreAIAnalysis(report: Report, recordAudit = true) { return this.engine.runAndStoreAIAnalysis(report, recordAudit); }
+  async runAndStoreAIAnalysis(report: Report, recordAudit = true) { return this.engine.runAndStoreAIAnalysis(report, recordAudit); }
 
   getIncidents(filter?: { status?: string; category?: string; priority?: string }) { return this.engine.getIncidents(filter as any); }
   getIncidentById(id: string) { return this.engine.getIncidentById(id); }

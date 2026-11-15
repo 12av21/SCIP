@@ -30,6 +30,7 @@ import { DeptOfficerDashboard } from './components/views/DeptOfficerDashboard';
 import { DataAnalystDashboard } from './components/views/DataAnalystDashboard';
 import { ReportDetailModal } from './components/views/ReportDetailModal';
 import { AuthModal } from './components/views/AuthModal';
+import { AccountLinkingModal } from './components/views/AccountLinkingModal';
 import { Report, Incident } from './types/scip';
 import { Home, ChevronRight, Shield } from 'lucide-react';
 
@@ -294,6 +295,9 @@ function SCIPMainLayout() {
           setCurrentTab(targetTab);
         }}
       />
+
+      {/* 7b. Clerk Identity Linking (bootstrap for unlinked Clerk sign-ins) */}
+      <AccountLinkingModal />
 
       {/* 8. Rich Government Footer (Section L) */}
       <GovernmentFooter

@@ -47,6 +47,7 @@ export type UserPermission =
 
 export interface User {
   id: string;
+  clerkUserId?: string;
   name: string;
   email: string;
   passwordHash?: string;
@@ -82,6 +83,44 @@ export interface User {
   jurisdictionLocalityIds?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ============================================================================
+// Clerk Identity Linking (Phase 3.1.3)
+// ============================================================================
+
+export type ClerkLinkStatus =
+  | 'NOT_LINKED'
+  | 'PENDING_VERIFICATION'
+  | 'VERIFIED'
+  | 'LINKED'
+  | 'EXPIRED'
+  | 'REJECTED'
+  | 'REVOKED';
+
+export type ClerkLinkVerificationMethod = 'ADMIN_APPROVED' | 'ONE_TIME_CHALLENGE';
+
+export interface ClerkIdentityLink {
+  id: string;
+  scipUserId: string;
+  clerkSubject: string;
+  status: ClerkLinkStatus;
+  verificationMethod: ClerkLinkVerificationMethod;
+  challengeHash?: string;
+  challengeSalt?: string;
+  challengeExpiresAt?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  resendCooldownUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  verifiedAt?: string;
+  linkedAt?: string;
+  expiresAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  reason?: string;
+  correlationId: string;
 }
 
 export interface Department {
@@ -449,8 +488,64 @@ export interface DatasetQualityMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Semantic Intelligence & AI Evaluation Types (Phase 2.3)
+// Metrics for semantic similarity, cross-language evaluation, duplicate
+// detection, and entity extraction. All computed with local TF-IDF / rule-based
+// engines — no sentence-transformers or trained ML models required.
+// ---------------------------------------------------------------------------
+
+export interface SemanticPairResult {
+  textA: string;
+  textB: string;
+  similarity: number; // 0 to 1
+  modelId: string;
+  languageMatch: boolean; // true if both texts use the same script family
+}
+
+export interface SemanticClusteringResult {
+  totalReports: number;
+  clusterCount: number;
+  averageSilhouette: number; // -1 to 1, higher = better separated clusters
+  intraClusterSimilarity: number; // average similarity within clusters
+  interClusterSimilarity: number; // average similarity between clusters
+  clusterSizeDistribution: number[]; // sizes of each cluster
+}
+
+export interface DuplicateDetectionEvaluation {
+  totalEvaluated: number;
+  truePositives: number;   // correctly identified duplicates
+  falsePositives: number;  // non-duplicates flagged as duplicates
+  falseNegatives: number;  // duplicates missed
+  precision: number;       // 0 to 1
+  recall: number;          // 0 to 1
+  f1Score: number;         // 0 to 1
+  threshold: number;       // decision threshold used
+}
+
+export interface EntityExtractionEvaluation {
+  totalEvaluated: number;
+  truePositives: number;   // correctly extracted entities
+  falsePositives: number;  // spurious entities
+  falseNegatives: number;  // missed entities
+  precision: number;       // 0 to 1
+  recall: number;          // 0 to 1
+  f1Score: number;         // 0 to 1
+  byType: Record<'locations' | 'infrastructure' | 'hazards', { precision: number; recall: number; f1: number }>;
+}
+
+export interface SemanticEvaluationResult {
+  evaluatedAt: string;
+  semanticPair: SemanticPairResult | null;
+  crossLanguagePairs: SemanticPairResult[];
+  semanticClustering: SemanticClusteringResult;
+  duplicateDetection: DuplicateDetectionEvaluation;
+  entityExtraction: EntityExtractionEvaluation;
+  overallScore: number; // 0 to 100, weighted composite
+  limitations: string[]; // honest limitations of the evaluation
+}
+
+// ---------------------------------------------------------------------------
 // Image Intelligence Types (Phase 4)
-// Metadata, analysis, and upload results for civic report evidence photos.
 // ---------------------------------------------------------------------------
 
 export type ImageSource = 'upload' | 'url' | 'camera';
@@ -750,6 +845,7 @@ export interface AgentToolResult {
   executionTimeMs: number;
   summary: string;
   data: any;
+  modelVersion?: string;
 }
 
 export interface AgentBriefing {
@@ -761,6 +857,7 @@ export interface AgentBriefing {
   toolResults: AgentToolResult[];
   recommendedActions: string[];
   uncertaintyDisclaimer: string;
+  modelUsed?: string;
 }
 
 // Runtime placeholder exports to guarantee Node.js 22 native type-stripping module resolution

@@ -4,7 +4,6 @@
 // Never logs OTPs, tokens, or passwords.
 
 import { Router, Response } from 'express';
-import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, logIpSecurityEvent } from '../middleware/auth.js';
