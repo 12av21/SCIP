@@ -37,8 +37,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccessNavigate
 }) => {
-  const { login, register, verifySignupEmailCode, resendSignupEmailCode, sendLoginEmailCode, verifyLoginEmailCode, emailVerified, phoneVerified, sendSmsVerification, verifySms, resendVerification } = useAuth();
+  const { login, register, verifySignupEmailCode, resendSignupEmailCode, sendLoginEmailCode, verifyLoginEmailCode, emailVerified, phoneVerified, sendSmsVerification, verifySms, resendVerification, isAuthenticated, user } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode);
+
+  // If already authenticated, close modal and navigate to the correct dashboard
+  useEffect(() => {
+    if (isOpen && isAuthenticated && user) {
+      onClose();
+      if (onSuccessNavigate) {
+        const role = (user as any)?.role || 'citizen';
+        switch (role) {
+          case 'field_officer':
+          case 'officer':
+            onSuccessNavigate('field-officer-dashboard');
+            break;
+          case 'dept_officer':
+            onSuccessNavigate('dept-officer-dashboard');
+            break;
+          case 'analyst':
+            onSuccessNavigate('analyst-dashboard');
+            break;
+          case 'authority':
+            onSuccessNavigate('intel-dashboard');
+            break;
+          case 'admin':
+            onSuccessNavigate('admin-panel');
+            break;
+          default:
+            onSuccessNavigate('citizen-dashboard');
+        }
+      }
+    }
+  }, [isOpen, isAuthenticated, user]);
 
   // Login Form States
   const [loginEmail, setLoginEmail] = useState('');
@@ -268,7 +298,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       await verifySignupEmailCode(signupEmailCode);
       setSuccessMessage('Email verified and registration completed.');
-      onClose();
+      navigateForRole('citizen');
     } catch (err: any) {
       const msg = err?.message || 'Invalid or expired verification code.';
       if (/additional verification|remaining|sign in/i.test(msg)) {

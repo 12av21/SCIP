@@ -300,6 +300,14 @@ useEffect(() => {
       setErrorMessage('Please provide more detail in the description (at least 10 characters).');
       return;
     }
+    if (pinCode.trim() && !/^[1-9][0-9]{5}$/.test(pinCode.trim())) {
+      setErrorMessage('Please enter a valid 6-digit Indian PIN code or leave it blank.');
+      return;
+    }
+    if (!locationName.trim()) {
+      setErrorMessage('Please select or enter a location for the report.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {

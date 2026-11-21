@@ -7,6 +7,7 @@
  * - No silent split-brain/cutover: if any gate fails, file-backed JSON remains active.
  * - Exports `db` as a delegating repository (active backend selected safely at startup).
  */
+import path from 'node:path';
 import { SCIPDatabase } from './scipDatabase.js';
 import { JsonScipRepository } from './jsonRepository.js';
 import { MongoScipRepository } from './mongoRepository.js';
@@ -26,7 +27,17 @@ function selectDriver(): DatabaseDriverSelection {
 }
 
 const requestedDriver = selectDriver();
-const jsonRepository = new JsonScipRepository();
+const testDbPath = process.env.SCIP_TEST_DB_PATH;
+let jsonRepository: JsonScipRepository;
+if (testDbPath && process.env.NODE_ENV === 'test') {
+  const resolved = path.resolve(process.cwd(), testDbPath);
+  if (path.basename(resolved) === '.scip_database.json') {
+    throw new Error('Refusing to use production database file in test mode.');
+  }
+  jsonRepository = new JsonScipRepository(resolved);
+} else {
+  jsonRepository = new JsonScipRepository();
+}
 let mongoRepository: MongoScipRepository | null = null;
 let activeRepository: IScipRepository = jsonRepository;
 let activeDriver: 'json' | 'mongo' | 'mongo-fallback-json' = requestedDriver === 'mongo' ? 'mongo-fallback-json' : 'json';

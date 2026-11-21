@@ -359,6 +359,18 @@ export function parseDataUrl(dataUrl: string): { buffer: Buffer; mimeType: strin
   const base64 = match[2];
   try {
     const buffer = Buffer.from(base64, 'base64');
+    // Validate that the claimed MIME matches the actual buffer magic bytes
+    const detected = detectFormat(buffer);
+    const allowedMimes: Record<string, string[]> = {
+      jpeg: ['image/jpeg', 'image/jpg'],
+      png: ['image/png'],
+      webp: ['image/webp'],
+      gif: ['image/gif']
+    };
+    const allowed = allowedMimes[detected];
+    if (!allowed || !allowed.includes(mimeType.toLowerCase())) {
+      return null;
+    }
     return { buffer, mimeType };
   } catch {
     return null;

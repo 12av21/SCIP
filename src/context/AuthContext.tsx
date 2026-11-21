@@ -222,8 +222,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       emailAddress: params.email,
       password: params.password,
       firstName,
-      lastName,
-      ...(params.phone ? { phoneNumber: params.phone } : {})
+      lastName
     });
     if (attempt.status === 'complete' && attempt.createdSessionId) {
       await clerk.setActive({ session: attempt.createdSessionId });

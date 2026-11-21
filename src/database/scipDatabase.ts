@@ -77,6 +77,7 @@ export class SCIPDatabase {
   private users: Map<string, User> = new Map();
   private departments: Map<string, Department> = new Map();
   private reports: Map<string, Report> = new Map();
+  private reportIdCounter = 0;
   private incidents: Map<string, Incident> = new Map();
   private analyses: Map<string, AIAnalysis> = new Map();
   private assignments: Map<string, Assignment> = new Map();
@@ -1141,7 +1142,7 @@ ipSecurityLogs: this.ipSecurityLogs,
     report: Report;
     analysis: AIAnalysis;
   }> {
-    const id = `REP-${new Date().getFullYear()}-${String(this.reports.size + 1).padStart(3, '0')}`;
+    const id = `REP-${new Date().getFullYear()}-${String(++this.reportIdCounter).padStart(3, '0')}`;
     const now = new Date().toISOString();
 
     const report: Report = {
