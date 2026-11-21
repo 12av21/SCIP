@@ -1,6 +1,4 @@
-// SCIP Citizen Portal - Track Report & Grievance Status View
-// Indian Government Portal Aesthetic with verifiable timeline and audit provenance
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { api } from '../../services/apiClient';
 import { Report, AIAnalysis } from '../../types/scip';
 import {
@@ -29,7 +27,7 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
   onNavigateToSubmit,
   onOpenReportModal
 }) => {
-  const [reportIdInput, setReportIdInput] = useState(initialReportId || 'REP-2026-001');
+  const [reportIdInput, setReportIdInput] = useState(initialReportId);
   const [reportData, setReportData] = useState<{ report: Report; analysis: AIAnalysis | null } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -39,17 +37,15 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
     loadRecentList();
     if (initialReportId) {
       handleLookup(initialReportId);
-    } else {
-      handleLookup('REP-2026-001');
     }
-  }, []);
+  }, [initialReportId]);
 
   const loadRecentList = async () => {
     try {
       const reps = await api.getReports();
-      setRecentReports(reps.slice(0, 5));
+      setRecentReports((reps || []).slice(0, 5));
     } catch {
-      // Ignore
+      setRecentReports([]);
     }
   };
 
@@ -99,7 +95,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto py-6 space-y-8 text-[#253443]">
-      {/* Title Header */}
       <div className="border-b border-[#DCE3EA] pb-4">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-[#E89B36]" />
@@ -112,7 +107,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
         </p>
       </div>
 
-      {/* Search Input Box */}
       <div className="bg-white rounded-xl border border-[#DCE3EA] p-6 shadow-xs space-y-4">
         <form onSubmit={handleFormSubmit} className="flex flex-col sm:flex-row items-center gap-3">
           <div className="relative flex-1 w-full">
@@ -122,7 +116,7 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
               required
               value={reportIdInput}
               onChange={e => setReportIdInput(e.target.value)}
-              placeholder="Enter Reference Number (e.g. REP-2026-001)"
+              placeholder="Enter Reference Number"
               className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg font-mono text-[#153E63] font-semibold focus:bg-white focus:border-[#1F5F91] focus:outline-hidden uppercase tracking-wider"
             />
           </div>
@@ -135,10 +129,9 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
           </button>
         </form>
 
-        {/* Quick select chips from recent records */}
         {recentReports.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-            <span className="text-[11px] text-[#657586] font-medium">Quick references:</span>
+            <span className="text-[11px] text-[#657586] font-medium">Available references:</span>
             {recentReports.map(r => (
               <button
                 type="button"
@@ -160,7 +153,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
         )}
       </div>
 
-      {/* Error state */}
       {errorMessage && (
         <div className="bg-[#FEF2F2] border border-[#FCA5A5] text-[#991B1B] p-4 rounded-xl text-xs flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2">
@@ -176,10 +168,19 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
         </div>
       )}
 
-      {/* Lookup Result Content */}
+      {!reportData && !errorMessage && !isLoading && (
+        <div className="bg-white rounded-xl border border-[#DCE3EA] p-8 text-center text-xs text-[#657586] space-y-2">
+          <Search className="w-6 h-6 mx-auto text-[#1F5F91]" />
+          <div className="font-semibold text-[#153E63]">Enter a reference number to view status</div>
+          <p>Use the acknowledgement ID provided when a report was submitted.</p>
+          {onNavigateToSubmit && (
+            <button onClick={onNavigateToSubmit} className="mt-2 text-[#1F5F91] font-semibold hover:underline">Submit a new report</button>
+          )}
+        </div>
+      )}
+
       {reportData && (
         <div className="space-y-6 animate-in fade-in duration-150">
-          {/* Main Status Dossier Header */}
           <div className="bg-white rounded-xl border border-[#DCE3EA] p-6 shadow-xs space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#DCE3EA] pb-4">
               <div>
@@ -188,7 +189,7 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
                     {reportData.report.id}
                   </span>
                   <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold uppercase ${
-                    reportData.report.status === 'resolved'
+                    reportData.report.status === 'resolved' || reportData.report.status === 'closed'
                       ? 'bg-[#EBF7EE] text-[#28834A] border border-[#A7E0B8]'
                       : 'bg-[#EAF2F8] text-[#1F5F91] border border-[#DCE3EA]'
                   }`}>
@@ -221,12 +222,10 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
               )}
             </div>
 
-            {/* Visual Step-by-Step Progress Bar */}
             <div className="space-y-3">
               <div className="text-xs font-bold uppercase tracking-wider text-[#153E63]">
                 Grievance Resolution Lifecycle
               </div>
-
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
                 {[
                   { step: 1, label: '1. Submitted', desc: 'Observation Logged' },
@@ -258,7 +257,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
               </div>
             </div>
 
-            {/* Description Details */}
             <div className="space-y-1.5">
               <div className="text-xs font-bold text-[#657586] uppercase tracking-wider">
                 Ground Description Logged
@@ -268,7 +266,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
               </p>
             </div>
 
-            {/* AI Analysis Findings from Real Database */}
             {reportData.analysis && (
               <div className="p-4 bg-[#F5F7FA] rounded-lg border border-[#DCE3EA] space-y-3">
                 <div className="flex items-center justify-between border-b border-[#DCE3EA] pb-2">
@@ -280,7 +277,6 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
                     Confidence: {(reportData.analysis.categoryConfidence * 100).toFixed(0)}%
                   </span>
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                   <div>
                     <span className="text-[#657586] text-[11px]">Identified Category:</span>
@@ -305,13 +301,12 @@ export const TrackReportView: React.FC<TrackReportViewProps> = ({
         </div>
       )}
 
-      {/* Footer Info Box */}
       <div className="p-4 bg-[#EAF2F8] rounded-xl border border-[#DCE3EA] text-xs text-[#253443] flex items-start gap-3">
         <Info className="w-5 h-5 text-[#1F5F91] shrink-0 mt-0.5" />
         <div className="space-y-1">
           <div className="font-bold text-[#153E63]">Need assistance with your report?</div>
           <p className="text-[#657586] leading-relaxed">
-            If your community hazard involves acute physical danger or open high-voltage power lines, contact municipal emergency dispatch directly on <strong>1912</strong> (Toll Free).
+            If a situation involves immediate danger to life or property, contact your local emergency services immediately.
           </p>
         </div>
       </div>

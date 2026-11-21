@@ -30,16 +30,9 @@ interface SubmitReportViewProps {
   onNavigateToMyReports?: () => void;
 }
 
-const PRESET_LOCATIONS = [
-  { name: 'Sector 4 Market Entrance', lat: 28.6142, lng: 77.2091 },
-  { name: 'Sector 4 Market Gate 2', lat: 28.6145, lng: 77.2094 },
-  { name: 'West Boulevard Transformer 14', lat: 28.6253, lng: 77.2184 },
-  { name: 'North Industrial Expressway Ramp B', lat: 28.6380, lng: 77.2300 },
-  { name: 'Central Plaza Food Street', lat: 28.6100, lng: 77.2050 },
-  { name: 'Riverfront Canal Footbridge', lat: 28.6180, lng: 77.2120 }
-];
+const PRESET_LOCATIONS: { name: string; lat: number; lng: number }[] = [];
 
-const DEFAULT_CENTER: [number, number] = [28.6139, 77.2090];
+const DEFAULT_CENTER: [number, number] = [20.5937, 78.9629];
 
 export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   onReportCreated,
@@ -48,7 +41,7 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ReportCategory>('Water & Drainage');
-  const [locationName, setLocationName] = useState('Sector 4 Market Entrance');
+  const [locationName, setLocationName] = useState('');
   const [latitude, setLatitude] = useState(DEFAULT_CENTER[0]);
   const [longitude, setLongitude] = useState(DEFAULT_CENTER[1]);
   const [urgency, setUrgency] = useState<UrgencyLevel>('medium');
@@ -87,7 +80,7 @@ useEffect(() => {
   if (!mapRef.current) {
     const map = L.map(containerRef.current, {
       center: DEFAULT_CENTER,
-      zoom: 13,
+      zoom: 5,
       zoomControl: false,
       attributionControl: false
     });
@@ -345,7 +338,7 @@ useEffect(() => {
     setTitle('');
     setDescription('');
     setCategory('Water & Drainage');
-    setLocationName('Sector 4 Market Entrance');
+    setLocationName('');
     setLatitude(DEFAULT_CENTER[0]);
     setLongitude(DEFAULT_CENTER[1]);
     setUrgency('medium');
@@ -362,7 +355,7 @@ useEffect(() => {
     setSubmittedResult(null);
     setErrorMessage('');
     if (mapRef.current && markerRef.current) {
-      mapRef.current.flyTo(DEFAULT_CENTER, 13);
+      mapRef.current.flyTo(DEFAULT_CENTER, 5);
       markerRef.current.setLatLng(DEFAULT_CENTER);
     }
   };
@@ -684,7 +677,7 @@ useEffect(() => {
                 <button
                   type="button"
                   onClick={() => {
-                    if (mapRef.current) mapRef.current.flyTo(DEFAULT_CENTER, 13);
+                    if (mapRef.current) mapRef.current.flyTo(DEFAULT_CENTER, 5);
                   }}
                   className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm"
                   title="Reset map view"
@@ -718,40 +711,22 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Quick Municipal Location Presets */}
+        {/* Location Description */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="block text-xs font-bold text-[#153E63] mb-0">
               Civic Landmark / Location Description <span className="text-[#B42318]">*</span>
             </label>
-            <span className="text-[10px] text-[#657586]">Tap map, use GPS, or choose preset</span>
+            <span className="text-[10px] text-[#657586]">Tap map, use GPS, or enter a description</span>
           </div>
           <input
             type="text"
             required
             value={locationName}
             onChange={e => setLocationName(e.target.value)}
+            placeholder="Describe the location (street, landmark, area)"
             className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
           />
-          <div className="mt-2.5 text-xs text-[#657586]">
-            <span className="text-[11px] font-semibold text-[#153E63]">Verified Civic Presets:</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {PRESET_LOCATIONS.map(p => (
-                <button
-                  type="button"
-                  key={p.name}
-                  onClick={() => handleLocationPreset(p)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors cursor-pointer ${
-                    locationName === p.name
-                      ? 'bg-[#1F5F91] border-[#1F5F91] text-white font-bold'
-                      : 'bg-[#F5F7FA] border-[#DCE3EA] text-[#253443] hover:bg-[#EAF2F8]'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* GPS Coordinates (read-only preview) */}

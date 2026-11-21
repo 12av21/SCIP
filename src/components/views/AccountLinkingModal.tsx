@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/apiClient';
-import { ShieldCheck, X, AlertCircle, CheckCircle2, Loader2, Link2, Mail } from 'lucide-react';
+import { ShieldCheck, X, AlertCircle, CheckCircle2, Loader2, Link2, Mail, UserPlus, User } from 'lucide-react';
 
 type LinkStatus = 'UNKNOWN' | 'NOT_LINKED' | 'PENDING' | 'LINKED';
 
@@ -20,10 +20,28 @@ function clerkSignedIn(): boolean {
   }
 }
 
+async function clerkSessionHealthy(): Promise<'active' | 'expired' | 'invalid' | 'none'> {
+  if (typeof window === 'undefined') return 'none';
+  const clerk = (window as any).__scip_clerk__;
+  if (!clerk) return 'none';
+  try {
+    const session = clerk.session;
+    if (!session) return 'none';
+    if (typeof session.isExpired === 'function' && session.isExpired()) return 'expired';
+    if (typeof session.getToken !== 'function') return 'invalid';
+    const token = await session.getToken();
+    if (!token || typeof token !== 'string' || token.trim().length === 0) return 'invalid';
+    return 'active';
+  } catch {
+    return 'invalid';
+  }
+}
+
 export const AccountLinkingModal: React.FC = () => {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, onboardClerkCitizen } = useAuth();
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<LinkStatus>('UNKNOWN');
+  const [sessionState, setSessionState] = useState<'active' | 'expired' | 'invalid' | 'none'>('none');
   const [linkId, setLinkId] = useState<string | undefined>(undefined);
   const [challengePending, setChallengePending] = useState(false);
   const [method, setMethod] = useState<'ONE_TIME_CHALLENGE' | 'ADMIN_APPROVED'>('ONE_TIME_CHALLENGE');
@@ -33,6 +51,11 @@ export const AccountLinkingModal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // New-user onboarding mode: the Clerk identity has no existing SCIP account.
+  const [isNewUser, setIsNewUser] = useState(false);
+  const [onboardName, setOnboardName] = useState('');
+  const [onboardPhone, setOnboardPhone] = useState('');
+  const [onboardAddress, setOnboardAddress] = useState('');
 
   const refresh = async () => {
     try {
@@ -44,22 +67,51 @@ export const AccountLinkingModal: React.FC = () => {
       setLinkId(d.id);
       setChallengePending(Boolean(d.challengePending));
       if (d.verificationMethod) setMethod(d.verificationMethod);
-    } catch {
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('401') || /expired|invalid|Authentication token|reauth|session/i.test(msg)) {
+        setSessionState('invalid');
+        setStatus('NOT_LINKED');
+        setError('Your authentication session is not valid. Please sign in again to continue.');
+        return;
+      }
       setStatus('NOT_LINKED');
     }
   };
 
   useEffect(() => {
-    if (isLoading) return;
-    if (isAuthenticated) { setOpen(false); return; }
-    if (clerkSignedIn()) {
+    let mounted = true;
+    const check = async () => {
+      if (isLoading) return;
+      if (isAuthenticated) { setOpen(false); return; }
+      if (!clerkSignedIn()) { setOpen(false); return; }
+      const s = await clerkSessionHealthy();
+      if (!mounted) return;
+      setSessionState(s);
+      if (s !== 'active') { setOpen(true); return; }
       setOpen(true);
-      refresh();
-    }
+      await refresh();
+    };
+    check();
+    return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, isAuthenticated]);
 
   if (!open) return null;
+
+  const clerkUser = (() => {
+    try { return (window as any).__scip_clerk__?.user ?? null; } catch { return null; }
+  })();
+  const clerkEmailAddr = String(
+    clerkUser?.primaryEmailAddress?.emailAddress ||
+    clerkUser?.emailAddresses?.[0]?.emailAddress ||
+    ''
+  ).trim();
+  const clerkFullName = String(
+    [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(' ') ||
+    clerkUser?.fullName ||
+    ''
+  ).trim();
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +168,82 @@ export const AccountLinkingModal: React.FC = () => {
     }
   };
 
+  const handleOnboard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null); setSuccess(null);
+    const emailToUse = (email || clerkEmailAddr || '').trim().toLowerCase();
+    const nameToUse = (onboardName || clerkFullName || '').trim();
+    if (!emailToUse || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToUse)) {
+      setError('A valid email address is required to create your SCIP account.');
+      return;
+    }
+    if (!nameToUse) {
+      setError('Your full name is required to create a SCIP account.');
+      return;
+    }
+    if (nameToUse.length > 100) {
+      setError('Name must be 100 characters or fewer.');
+      return;
+    }
+    if (onboardPhone && onboardPhone.trim().length > 30) {
+      setError('Phone must be 30 characters or fewer.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await onboardClerkCitizen({
+        name: nameToUse,
+        email: emailToUse,
+        phone: onboardPhone.trim() || undefined,
+        residenceAddress: onboardAddress.trim() || undefined
+      });
+      setSuccess('Your SCIP citizen account has been created.');
+      setTimeout(() => window.location.reload(), 900);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('already exists') || msg.includes('already registered') || msg.includes('409')) {
+        setError('An account with this email address already exists. Link your existing SCIP account instead.');
+        setIsNewUser(false);
+        return;
+      }
+      if (/verification|verify/i.test(msg)) {
+        setError('Email verification is required before creating your SCIP account. Complete Clerk verification, then try again.');
+        return;
+      }
+      setError(msg || 'Failed to create your SCIP account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleNewUser = () => {
+    setIsNewUser(v => !v);
+    setError(null);
+    setSuccess(null);
+    if (!isNewUser) {
+      if (!onboardName && clerkFullName) setOnboardName(clerkFullName);
+      if (!email && clerkEmailAddr) setEmail(clerkEmailAddr);
+    }
+  };
+
+  const handleReauthenticate = async () => {
+    setError(null); setSuccess(null);
+    try {
+      const clerk = (window as any).__scip_clerk__;
+      if (clerk && typeof clerk.openSignIn === 'function') {
+        await clerk.openSignIn();
+        return;
+      }
+      if (clerk && typeof clerk.redirectToSignIn === 'function') {
+        await clerk.redirectToSignIn();
+        return;
+      }
+      window.location.reload();
+    } catch {
+      window.location.reload();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
       <div
@@ -156,11 +284,34 @@ export const AccountLinkingModal: React.FC = () => {
             </div>
           )}
 
-          {status === 'NOT_LINKED' && (
+          {sessionState !== 'active' && status !== 'PENDING' && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[#92400E] text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  {sessionState === 'expired'
+                    ? 'Your Clerk session has expired. Please sign in again to continue.'
+                    : sessionState === 'invalid'
+                      ? 'Your authentication session is invalid or could not be verified. Please sign in again to continue.'
+                      : 'No active Clerk session found. Please sign in to continue.'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleReauthenticate}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Sign in again</span>
+              </button>
+            </div>
+          )}
+
+          {sessionState === 'active' && status === 'NOT_LINKED' && !isNewUser && (
             <form onSubmit={handleRequest} className="space-y-3.5">
               <div className="p-2.5 rounded-md bg-[#EAF2F8] border border-[#B9D5EB] text-[11px] text-[#153E63] flex items-start gap-2">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#1F5F91] shrink-0 mt-0.5" />
-                <span>You are signed in with Clerk but no SCIP account is linked yet. Enter the email or user ID on your existing SCIP account to request a link.</span>
+                <span>You are signed in with Clerk but no SCIP account is linked yet. Link an existing SCIP account, or create a new citizen account if you are new to SCIP.</span>
               </div>
 
               <div>
@@ -171,7 +322,7 @@ export const AccountLinkingModal: React.FC = () => {
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="name@example.com"
+                    placeholder={clerkEmailAddr || 'name@example.com'}
                     className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
                   />
                 </div>
@@ -198,7 +349,7 @@ export const AccountLinkingModal: React.FC = () => {
                   <option value="ONE_TIME_CHALLENGE">One-time code to my verified contact</option>
                   <option value="ADMIN_APPROVED">Administrator approval</option>
                 </select>
-                <p className="text-[10px] text-[#657586] mt-1">A one-time code is only sent to a contact channel already verified on your SCIP account.</p>
+                <p className="text-[10px] text-[#657586] mt-1">For existing members only. A one-time code is sent only to a contact channel already verified on your SCIP account.</p>
               </div>
 
               <button
@@ -207,8 +358,100 @@ export const AccountLinkingModal: React.FC = () => {
                 className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                <span>{loading ? 'Submitting…' : 'Request Account Link'}</span>
+                <span>{loading ? 'Submitting…' : 'Link Existing SCIP Account'}</span>
               </button>
+
+              <div className="pt-2 border-t border-[#DCE3EA] text-center">
+                <p className="text-[11px] text-[#657586] mb-1.5">New to SCIP?</p>
+                <button
+                  type="button"
+                  onClick={toggleNewUser}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1F5F91] hover:text-[#153E63]"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Create a new citizen account</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {sessionState === 'active' && status === 'NOT_LINKED' && isNewUser && (
+            <form onSubmit={handleOnboard} className="space-y-3.5">
+              <div className="p-2.5 rounded-md bg-[#EAF2F8] border border-[#B9D5EB] text-[11px] text-[#153E63] flex items-start gap-2">
+                <UserPlus className="w-3.5 h-3.5 text-[#1F5F91] shrink-0 mt-0.5" />
+                <span>Create your SCIP citizen profile using your verified Clerk identity. Your account will be created with the default citizen role only.</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">Full name</label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={onboardName}
+                    onChange={e => setOnboardName(e.target.value)}
+                    placeholder={clerkFullName || 'Your full name'}
+                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">Email address</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={email || clerkEmailAddr}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder={clerkEmailAddr || 'name@example.com'}
+                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">Phone (optional)</label>
+                <input
+                  type="tel"
+                  value={onboardPhone}
+                  onChange={e => setOnboardPhone(e.target.value)}
+                  placeholder="Mobile number"
+                  className="w-full text-xs px-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">Residence address (optional)</label>
+                <input
+                  type="text"
+                  value={onboardAddress}
+                  onChange={e => setOnboardAddress(e.target.value)}
+                  placeholder="Address"
+                  className="w-full text-xs px-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                <span>{loading ? 'Creating account…' : 'Create Citizen Account'}</span>
+              </button>
+
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={toggleNewUser}
+                  className="text-xs text-[#657586] hover:text-[#153E63] underline"
+                >
+                  Back to linking an existing SCIP account
+                </button>
+              </div>
             </form>
           )}
 

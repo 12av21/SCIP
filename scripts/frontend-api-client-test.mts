@@ -68,6 +68,39 @@ function hangingFetch(_url: string, init: any): Promise<never> {
   ok('error message surfaced', msg === 'boom', msg);
 }
 
+// 6. Clerk session token is awaited (async getToken) and used as bearer.
+{
+  (globalThis as any).window = {
+    __scip_clerk__: { session: { getToken: async () => 'clerk-token-123' } }
+  };
+  (globalThis as any).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  (api as any).token = null;
+  const token = await api.getToken();
+  ok('clerk token awaited', token === 'clerk-token-123', String(token));
+  delete (globalThis as any).window;
+  delete (globalThis as any).localStorage;
+  (api as any).token = null;
+}
+
+// 7. request() forwards the Clerk token as an Authorization header.
+{
+  (globalThis as any).window = {
+    __scip_clerk__: { session: { getToken: async () => 'clerk-token-xyz' } }
+  };
+  (globalThis as any).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  (api as any).token = null;
+  let seenAuth = '';
+  (globalThis as any).fetch = async (_url: string, init: any) => {
+    seenAuth = new Headers(init.headers).get('authorization') || '';
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  await req('/x', {}, 1000);
+  ok('clerk bearer token sent', seenAuth === 'Bearer clerk-token-xyz', seenAuth);
+  delete (globalThis as any).window;
+  delete (globalThis as any).localStorage;
+  (api as any).token = null;
+}
+
 console.log(results.join('\n'));
 console.log(`SUMMARY: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

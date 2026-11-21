@@ -35,12 +35,12 @@ const USER_KEY = 'scip_auth_user';
 // network or backend stalls. Callers can override per request via `signal`.
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
-function getClerkToken(): string | null {
+async function getClerkToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const clerk = (window as any).__scip_clerk__;
   if (clerk && typeof clerk.session?.getToken === 'function') {
     try {
-      return clerk.session.getToken();
+      return await clerk.session.getToken();
     } catch {
       return null;
     }
@@ -53,7 +53,7 @@ class APIClient {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.token = getClerkToken() || localStorage.getItem(TOKEN_KEY);
+      this.token = localStorage.getItem(TOKEN_KEY);
     }
   }
 
@@ -68,9 +68,14 @@ class APIClient {
     }
   }
 
-  public getToken(): string | null {
-    if (!this.token) {
-      this.token = getClerkToken() || (typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null);
+  public async getToken(): Promise<string | null> {
+    const clerkToken = await getClerkToken();
+    if (clerkToken) {
+      this.token = clerkToken;
+      return this.token;
+    }
+    if (!this.token && typeof window !== 'undefined') {
+      this.token = localStorage.getItem(TOKEN_KEY);
     }
     return this.token;
   }
@@ -99,7 +104,7 @@ class APIClient {
     const headers = new Headers(options.headers || {});
     headers.set('Content-Type', 'application/json');
 
-    const token = this.getToken();
+    const token = await this.getToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
@@ -404,6 +409,18 @@ class APIClient {
 
   public async requestAccountLink(payload: { email?: string; scipUserId?: string; verificationMethod: 'ADMIN_APPROVED' | 'ONE_TIME_CHALLENGE' }) {
     return await this.request<{ success: boolean; message: string }>('/api/auth/linking/request', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  /**
+   * Secure citizen onboarding for a verified Clerk identity with no existing
+   * SCIP account. Creates a new citizen profile and links the Clerk subject.
+   * Always returns role 'citizen'; never escalates privileges.
+   */
+  public async onboardClerkCitizen(payload: { name: string; email: string; phone?: string; residenceAddress?: string }) {
+    return await this.request<{ success: boolean; message: string; data?: { id: string; name: string; email: string; role: string; status: string } }>('/api/auth/linking/onboard', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -734,7 +751,7 @@ class APIClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
     try {
-      const token = this.getToken();
+      const token = await this.getToken();
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(`/api/image/${encodeURIComponent(imageId)}`, {

@@ -111,7 +111,7 @@ export const GovernmentHeader: React.FC<GovernmentHeaderProps> = ({
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder={t('header.search_placeholder', 'Search services, report ID (REP-...), or department...')}
+              placeholder={t('header.search_placeholder', 'Search services or report reference (e.g. REP-...)')}
               className="w-full pl-9 pr-20 py-2 text-xs bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg text-[#253443] placeholder-[#657586] focus:bg-white focus:border-[#1F5F91] focus:outline-hidden transition-colors"
             />
             <button

@@ -1,0 +1,35 @@
+﻿msedge.exe : [19996:12256:1116/115035.344:ERROR:chrome\browser\task_manager\providers\fallback_task_provider.cc:126] 
+Every renderer should have at least one task provided by a primary task provider. If a "Renderer" fallback task is 
+shown, it is a bug. If you have repro steps, please file a new bug and tag it as a dependency of crbug.com/40528867.
+At line:4 char:231
++ ... ages){ $dom=& $edge --headless --disable-gpu --no-sandbox --virtual-t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([19996:12256:11...g.com/40528867.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+<!DOCTYPE html>
+<html lang="en"><head>
+    <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+    <script type="module" src="/@vite/client"></script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCIP — Smart Community Intelligence Platform</title>
+    <meta name="description" content="AI-assisted community intelligence platform connecting citizen reports, detecting spatio-temporal hazard clusters, and delivering decision support with Responsible AI governance.">
+    <meta property="og:title" content="SCIP — Smart Community Intelligence Platform">
+    <meta property="og:description" content="AI-assisted community intelligence platform connecting citizen reports, detecting spatio-temporal hazard clusters, and delivering decision support with Responsible AI governance.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+  </head>
+  <body class="bg-slate-50 text-slate-800 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  
+
+
+</body></html>
+

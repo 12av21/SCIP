@@ -29,7 +29,7 @@ interface AuthModalProps {
   onSuccessNavigate?: (tab: string) => void;
 }
 
-type AuthMode = 'login' | 'signup' | 'email-otp' | 'sms-otp' | 'verify-email' | 'verify-sms';
+type AuthMode = 'login' | 'signup' | 'email-otp' | 'email-code' | 'signup-email-code' | 'sms-otp' | 'verify-email' | 'verify-sms';
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
@@ -37,7 +37,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccessNavigate
 }) => {
-  const { login, register, emailVerified, phoneVerified, sendSmsVerification, verifySms, resendVerification } = useAuth();
+  const { login, register, verifySignupEmailCode, resendSignupEmailCode, sendLoginEmailCode, verifyLoginEmailCode, emailVerified, phoneVerified, sendSmsVerification, verifySms, resendVerification } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode);
 
   // Login Form States
@@ -46,13 +46,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
+  // Email-code sign-in states
+  const [emailOtpEmail, setEmailOtpEmail] = useState('');
+  const [emailOtpCode, setEmailOtpCode] = useState('');
+
   // Signup Form States
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPhone, setSignupPhone] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [signupEmailCode, setSignupEmailCode] = useState('');
 
   // Verification States
   const [verifyPhoneInput, setVerifyPhoneInput] = useState('');
@@ -103,6 +110,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  const completeLogin = (email: string) => {
+    onClose();
+    const emailLower = email.toLowerCase();
+    if (emailLower.includes('admin')) {
+      navigateForRole('admin');
+    } else if (emailLower.includes('director') || emailLower.includes('auth')) {
+      navigateForRole('authority');
+    } else if (emailLower.includes('dept') || emailLower.includes('desk')) {
+      navigateForRole('dept_officer');
+    } else if (emailLower.includes('analyst') || emailLower.includes('data')) {
+      navigateForRole('analyst');
+    } else if (emailLower.includes('officer')) {
+      navigateForRole('officer');
+    } else {
+      navigateForRole('citizen');
+    }
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -115,24 +140,53 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await login();
-      onClose();
-      const emailLower = loginEmail.toLowerCase();
-      if (emailLower.includes('admin')) {
-        navigateForRole('admin');
-      } else if (emailLower.includes('director') || emailLower.includes('auth')) {
-        navigateForRole('authority');
-      } else if (emailLower.includes('dept') || emailLower.includes('desk')) {
-        navigateForRole('dept_officer');
-      } else if (emailLower.includes('analyst') || emailLower.includes('data')) {
-        navigateForRole('analyst');
-      } else if (emailLower.includes('officer')) {
-        navigateForRole('officer');
-      } else {
-        navigateForRole('citizen');
-      }
+      await login(loginEmail, loginPassword);
+      completeLogin(loginEmail);
     } catch (err: any) {
       setErrorMessage(err.message || 'Invalid credentials. Please verify your email and password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendEmailCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!emailOtpEmail) {
+      setErrorMessage('Please enter your email address.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendLoginEmailCode(emailOtpEmail);
+      setMode('email-code');
+      setSuccessMessage('Verification code sent. Enter the 6-digit code to continue.');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to send verification code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!emailOtpCode.trim() || emailOtpCode.length !== 6) {
+      setErrorMessage('Please enter the 6-digit verification code.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await verifyLoginEmailCode(emailOtpCode);
+      completeLogin(emailOtpEmail);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Invalid or expired code.');
     } finally {
       setLoading(false);
     }
@@ -154,8 +208,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (!signupPassword) {
+      setErrorMessage('Password is required.');
+      return;
+    }
+
     if (signupPassword.length < 8) {
       setErrorMessage('Password must be at least 8 characters in length.');
+      return;
+    }
+
+    if (!signupConfirmPassword) {
+      setErrorMessage('Please confirm your password.');
       return;
     }
 
@@ -171,11 +235,65 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await register();
-      setSuccessMessage('Registration successful. Please verify your email address via Clerk.');
+      const result = await register({ name: signupName, email: signupEmail, phone: signupPhone, password: signupPassword });
+      if (result === 'complete') {
+        setSuccessMessage('Registration successful. You can continue.');
+        onClose();
+        return;
+      }
+      setMode('signup-email-code');
+      setSuccessMessage('Account created. Enter the email verification code sent by the authentication provider to complete registration.');
+    } catch (err: any) {
+      const msg = err?.message || 'Registration failed. An account with this email may already exist.';
+      if (/missing_requirements|verification|verify|additional/i.test(msg)) {
+        setMode('signup-email-code');
+        setSuccessMessage('Account created, but additional verification is required. Enter the verification code sent to your email, then sign in if needed.');
+      } else {
+        setErrorMessage(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySignupEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    if (!signupEmailCode.trim() || signupEmailCode.length !== 6) {
+      setErrorMessage('Please enter the 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await verifySignupEmailCode(signupEmailCode);
+      setSuccessMessage('Email verified and registration completed.');
       onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Registration failed. An account with this email may already exist.');
+      const msg = err?.message || 'Invalid or expired verification code.';
+      if (/additional verification|remaining|sign in/i.test(msg)) {
+        setSuccessMessage(msg);
+        setMode('login');
+        setLoginEmail(signupEmail);
+      } else {
+        setErrorMessage(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendSignupEmailCode = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setLoading(true);
+    try {
+      await resendSignupEmailCode();
+      setSuccessMessage('Verification code resent to your email.');
+      setResendChannel('email');
+      setResendCooldown(60);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to resend verification code.');
     } finally {
       setLoading(false);
     }
@@ -427,6 +545,128 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </button>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailOtpEmail(loginEmail);
+                  setMode('email-otp');
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                className="w-full text-center text-[11px] text-[#1F5F91] hover:text-[#153E63] underline mt-1"
+              >
+                Use email verification code instead
+              </button>
+
+            </form>
+          )}
+
+          {/* MODE: EMAIL CODE SEND */}
+          {mode === 'email-otp' && (
+            <form onSubmit={handleSendEmailCode} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    required
+                    value={emailOtpEmail}
+                    onChange={e => setEmailOtpEmail(e.target.value)}
+                    placeholder="e.g. admin+clerk_test@example.com"
+                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-[#657586]">
+                We'll email a 6-digit verification code to this address.
+              </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Send Verification Code</span>
+                    <Send className="w-3 h-3" />
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setErrorMessage(null); }}
+                className="w-full text-center text-xs text-[#657586] hover:text-[#153E63]"
+              >
+                Back to Sign In
+              </button>
+            </form>
+          )}
+
+          {/* MODE: EMAIL CODE VERIFY */}
+          {mode === 'email-code' && (
+            <form onSubmit={handleVerifyEmailCode} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">
+                  6-Digit Verification Code
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={emailOtpCode}
+                    onChange={e => setEmailOtpCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="424242"
+                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all tracking-[0.3em]"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-[#657586]">
+                Enter the 6-digit code sent to <span className="font-semibold">{emailOtpEmail}</span>.
+              </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verify &amp; Sign In</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setMode('login'); setErrorMessage(null); }}
+                  className="text-xs text-[#657586] hover:text-[#153E63]"
+                >
+                  Back to Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendEmailCode()}
+                  className="text-xs text-[#1F5F91] hover:text-[#153E63] underline"
+                >
+                  Resend code
+                </button>
+              </div>
             </form>
           )}
 
@@ -450,16 +690,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#253443] mb-1">
+                  <label className="block text-xs font-semibold text-[#253443] mb-1" htmlFor="signup-email">
                     Email Address
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
+                      id="signup-email"
                       type="email"
                       required
+                      autoComplete="email"
                       value={signupEmail}
                       onChange={e => setSignupEmail(e.target.value)}
                       placeholder="name@example.com"
@@ -469,18 +711,81 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#253443] mb-1">
+                  <label className="block text-xs font-semibold text-[#253443] mb-1" htmlFor="signup-phone">
                     Mobile Phone (Optional)
                   </label>
                   <div className="relative">
                     <Phone className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
+                      id="signup-phone"
                       type="tel"
+                      autoComplete="tel"
                       value={signupPhone}
                       onChange={e => setSignupPhone(e.target.value)}
                       placeholder="+91-98765-XXXXX"
                       className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
                     />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-[#253443]" htmlFor="signup-password">
+                      Password
+                    </label>
+                    <span className="text-[11px] text-[#657586]">Min. 8 characters</span>
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      id="signup-password"
+                      type={showSignupPassword ? 'text' : 'password'}
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      value={signupPassword}
+                      onChange={e => setSignupPassword(e.target.value)}
+                      placeholder="Create a password"
+                      className="w-full text-xs pl-9 pr-9 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#657586] hover:text-[#153E63]"
+                      aria-label={showSignupPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showSignupPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#253443] mb-1" htmlFor="signup-confirm-password">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      id="signup-confirm-password"
+                      type={showSignupConfirmPassword ? 'text' : 'password'}
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      value={signupConfirmPassword}
+                      onChange={e => setSignupConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      className="w-full text-xs pl-9 pr-9 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupConfirmPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#657586] hover:text-[#153E63]"
+                      aria-label={showSignupConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    >
+                      {showSignupConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -521,6 +826,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </>
                 )}
               </button>
+            </form>
+          )}
+
+          {/* MODE: SIGNUP EMAIL VERIFY */}
+          {mode === 'signup-email-code' && (
+            <form onSubmit={handleVerifySignupEmailCode} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#253443] mb-1">
+                  6-Digit Email Verification Code
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-[#657586] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={signupEmailCode}
+                    onChange={e => setSignupEmailCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="123456"
+                    className="w-full text-xs pl-9 pr-3 py-2 bg-[#F5F7FA] border border-[#DCE3EA] rounded-md text-[#253443] placeholder-[#657586]/60 focus:outline-hidden focus:border-[#1F5F91] focus:bg-white transition-all tracking-[0.3em]"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-[#657586]">
+                Enter the code sent to <span className="font-semibold">{signupEmail || 'your email'}</span> to complete registration.
+              </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#153E63] hover:bg-[#1F5F91] disabled:bg-slate-300 rounded-md shadow-2xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verify Email & Complete Registration</span>
+                    <Check className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setMode('login'); setErrorMessage(null); setLoginEmail(signupEmail); }}
+                  className="text-xs text-[#657586] hover:text-[#153E63]"
+                >
+                  Back to Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendSignupEmailCode}
+                  disabled={loading || resendCooldown > 0}
+                  className="text-xs text-[#1F5F91] hover:text-[#153E63] underline disabled:opacity-50"
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+                </button>
+              </div>
             </form>
           )}
 

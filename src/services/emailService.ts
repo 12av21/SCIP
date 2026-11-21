@@ -55,7 +55,14 @@ export class ConsoleEmailProvider implements EmailService {
     console.log(`[EMAIL] Subject: ${request.subject}`);
     console.log(`[EMAIL] Provider: ${this.config.provider}`);
     if (isOtpEmail) {
-      console.log(`[EMAIL] Body: [OTP/verification email - content redacted for security]`);
+      // Never expose OTP content in production. In non-production (local demo/dev),
+      // surface the body so the account-linking challenge can be completed without a
+      // real email provider. This is a dev-only convenience.
+      if (process.env.NODE_ENV === 'production') {
+        console.log(`[EMAIL] Body: [OTP/verification email - content redacted for security]`);
+      } else {
+        console.log(`[EMAIL] Body (dev only): ${safeBody.slice(0, 400)}`);
+      }
     } else {
       console.log(`[EMAIL] Body: ${safeBody.slice(0, 200)}...`);
     }

@@ -475,6 +475,76 @@ export class MongoScipRepository implements IScipRepository {
     return stripPassword(newUser)!;
   }
 
+  async createClerkCitizen(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    clerkSubject: string;
+    residenceAddress?: string;
+  }): Promise<User> {
+    const safeName = String(input.name || '').trim();
+    const safeEmail = String(input.email || '').toLowerCase().trim();
+    if (!safeName) throw new Error('Name is required.');
+    if (!safeEmail) throw new Error('Email is required.');
+    if (safeName.length > 100) throw new Error('Name must be 100 characters or fewer.');
+    if (safeEmail.length > 254) throw new Error('Email must be 254 characters or fewer.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) throw new Error('Invalid email format.');
+    if (typeof input.clerkSubject !== 'string' || input.clerkSubject.trim().length === 0) {
+      throw new Error('Clerk identity is required.');
+    }
+    if (input.phone !== undefined && (typeof input.phone !== 'string' || input.phone.trim().length > 30)) {
+      throw new Error('Phone must be 30 characters or fewer.');
+    }
+
+    // Deterministic duplicate guards before write.
+    const existingEmail = await UserModel.findOne({ email: safeEmail }).lean();
+    if (existingEmail) throw new Error(`Email ${safeEmail} is already registered.`);
+    const existingClerk = await UserModel.findOne({ clerkUserId: input.clerkSubject }).lean();
+    if (existingClerk) throw new Error('Clerk identity is already linked to a SCIP account.');
+
+    const id = await userId();
+    const now = nowIso();
+    const newUser: any = {
+      id,
+      name: safeName,
+      email: safeEmail,
+      role: 'citizen',
+      phone: input.phone ? input.phone.trim() : undefined,
+      clerkUserId: input.clerkSubject,
+      status: 'active',
+      sessionVersion: 0,
+      credentialsResetRequired: false,
+      emailVerified: true,
+      phoneVerified: Boolean(input.phone && input.phone.trim().length > 0),
+      verificationAttempts: 0,
+      residenceAddress: typeof input.residenceAddress === 'string' ? input.residenceAddress.trim().slice(0, 500) : undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+    try {
+      await UserModel.create(newUser);
+    } catch (e: any) {
+      if (e?.code === 11000 && e?.keyPattern && e.keyPattern.clerkUserId !== undefined) {
+        throw new DuplicateClerkIdentityError();
+      }
+      if (e?.code === 11000 && e?.keyPattern && e.keyPattern.email !== undefined) {
+        throw new Error(`Email ${safeEmail} is already registered.`);
+      }
+      throw e;
+    }
+    await this.logAudit({
+      action: 'USER_CREATED',
+      module: 'auth',
+      recordId: id,
+      userId: id,
+      userEmail: newUser.email,
+      userRole: newUser.role,
+      ipAddress: '127.0.0.1',
+      details: `New citizen created via Clerk onboarding (clerkSubject=${input.clerkSubject})`
+    } as any);
+    return stripPassword(newUser)!;
+  }
+
   async updateUserRole(userId: string, newRole: UserRole, adminUser: User): Promise<User> {
     const user: any = await UserModel.findOne({ id: userId }).lean();
     if (!user) throw new Error('User not found');

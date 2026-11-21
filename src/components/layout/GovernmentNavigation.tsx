@@ -45,15 +45,17 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
     setIsMobileMenuOpen(false);
   };
 
-  // Dynamically generate role-scoped navigation items
   const getNavItems = () => {
     if (!user) {
       return [
         { id: 'home', label: t('nav.home', 'Home'), icon: Home },
+        { id: 'features', label: 'Features', icon: SlidersHorizontal },
+        { id: 'how-it-works', label: 'How It Works', icon: CheckCircle2 },
+        { id: 'community-reporting', label: 'Community Reporting', icon: FileText },
+        { id: 'ai-intelligence', label: 'AI Intelligence', icon: Cpu },
         { id: 'track-report', label: t('nav.track_grievance', 'Track Grievance'), icon: Search },
         { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
-        { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info },
-        { id: 'tests', label: t('nav.system_audit', 'Audit Suite'), icon: CheckCircle2 }
+        { id: 'help-support', label: 'Help & Support', icon: Info }
       ];
     }
 
@@ -115,15 +117,14 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
         // Super Administrator
         return [
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
-          { id: 'admin-panel', label: t('nav.admin_governance', 'Governance & Audit'), icon: SlidersHorizontal },
+          { id: 'admin-panel', label: t('nav.admin_governance', 'Administration'), icon: SlidersHorizontal },
           { id: 'intel-dashboard', label: t('nav.command_center', 'Command Center'), icon: Radio },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
           { id: 'analyst-dashboard', label: t('nav.analytics_models', 'Model Metrics'), icon: BarChart3 },
           { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
-          { id: 'tests', label: t('nav.system_audit', 'System Audit'), icon: CheckCircle2 },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
-          { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }
+          { id: 'about', label: t('nav.citizen_charter', 'About'), icon: Info }
         ];
 
       case 'citizen':

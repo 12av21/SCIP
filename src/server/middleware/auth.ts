@@ -174,6 +174,10 @@ export interface AuthenticatedRequest extends Request {
   user?: User;
   clerkSubject?: string;
   clerkEmail?: string;
+  clerkEmailVerified?: boolean;
+  clerkPhone?: string;
+  clerkPhoneVerified?: boolean;
+  clerkName?: string;
 }
 export const AuthenticatedRequest = {} as any;
 
@@ -360,6 +364,16 @@ export async function authenticateLinking(req: AuthenticatedRequest, res: Respon
     req.clerkSubject = clerkSubject;
     const emailish = (clerk as any)?.email || (clerk as any)?.email_address;
     if (typeof emailish === 'string' && emailish.length > 0) req.clerkEmail = emailish;
+    req.clerkEmailVerified = Boolean((clerk as any)?.email_verified ?? (clerk as any)?.emailVerified);
+    const phoneish = (clerk as any)?.phone_number || (clerk as any)?.phoneNumber;
+    if (typeof phoneish === 'string' && phoneish.length > 0) req.clerkPhone = phoneish;
+    req.clerkPhoneVerified = Boolean((clerk as any)?.phone_number_verified ?? (clerk as any)?.phoneVerified);
+    if (typeof (clerk as any)?.name === 'string' && (clerk as any).name.trim()) {
+      req.clerkName = (clerk as any).name.trim();
+    } else {
+      const nameish = [(clerk as any)?.first_name, (clerk as any)?.last_name].filter((v: any) => typeof v === 'string' && v.trim()).join(' ').trim();
+      if (nameish) req.clerkName = nameish;
+    }
 
     // Best-effort: attach an already-linked SCIP user (never required for bootstrap).
     const existing = await db.getUserByClerkId(clerkSubject);
@@ -421,9 +435,14 @@ export function requirePermission(permission: UserPermission) {
       return;
     }
 
-    // Unverified accounts cannot access protected resources
+    // Unverified accounts cannot access protected resources.
+    // Exempt privileged/trusted internal roles and Clerk-linked identities (Clerk is the IdP and
+    // handles identity verification; SCIP's separate email/phone flags may not be set for them).
+    // Do not weaken auth for citizens without a verified channel and without a Clerk identity.
     const user = req.user as any;
-    if (!user.emailVerified && !user.phoneVerified) {
+    const isClerkLinked = typeof user.clerkUserId === 'string' && user.clerkUserId.trim().length > 0;
+    const isPrivilegedRole = ['admin', 'authority', 'analyst', 'officer', 'dept_officer'].includes(user.role);
+    if (!user.emailVerified && !user.phoneVerified && !isClerkLinked && !isPrivilegedRole) {
       await db.logAudit({
         action: 'SECURITY_EVENT',
         module: 'security',

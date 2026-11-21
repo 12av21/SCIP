@@ -31,6 +31,7 @@ export class JsonScipRepository implements IScipRepository {
   // --- Clerk Identity Linking (Phase 3.1.3) ---
   linkClerkIdentity(scipUserId: string, clerkSubject: string) { return this.engine.linkClerkIdentity(scipUserId, clerkSubject); }
   createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }) { return this.engine.createClerkLinkRequest(input); }
+  createClerkCitizen(input: { name: string; email: string; phone?: string; clerkSubject: string; residenceAddress?: string }) { return this.engine.createClerkCitizen(input); }
   getClerkLinkById(id: string) { return this.engine.getClerkLinkById(id); }
   getClerkLinkBySubject(clerkSubject: string) { return this.engine.getClerkLinkBySubject(clerkSubject); }
   getClerkLinksByScipUser(scipUserId: string) { return this.engine.getClerkLinksByScipUser(scipUserId); }

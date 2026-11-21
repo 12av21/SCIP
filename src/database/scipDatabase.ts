@@ -61,6 +61,15 @@ import { aiAdapter } from '../ai/aiServiceAdapter.js';
 import { datasetManager } from '../ai/datasetManager.js';
 import { modelRegistry } from '../ai/modelRegistry.js';
 import { DuplicateClerkIdentityError } from './identityErrors.js';
+import {
+  isHiddenReport,
+  isHiddenIncident,
+  isHiddenUser,
+  isHiddenNotification,
+  isHiddenInspection,
+  isSeedAuditLog,
+  isHiddenFeedback
+} from './dataIsolation.js';
 
 const DEFAULT_STORAGE_FILE = path.resolve(process.cwd(), '.scip_database.json');
 
@@ -86,6 +95,7 @@ export class SCIPDatabase {
   private ipSecurityLogs: IPSecurityLog[] = [];
   private clerkLinks: Map<string, ClerkIdentityLink> = new Map();
   private isPersistedToDisk: boolean = false;
+  private loadedFromPersistedState: boolean = false;
   private storageFile: string;
 
   constructor(storageFile?: string) {
@@ -118,6 +128,7 @@ export class SCIPDatabase {
           (data.clerkLinks || []).forEach((l: ClerkIdentityLink) => this.clerkLinks.set(l.id, l));
           // Security: do not rewrite historical audit records on load. Verification is a separate operation.
           this.isPersistedToDisk = true;
+          this.loadedFromPersistedState = true;
 
           // Load administrative location data from persisted storage (additive; does not overwrite existing)
           (data.adminStates || []).forEach((s: AdminState) => this.adminStates.set(s.id, s));
@@ -463,7 +474,7 @@ ipSecurityLogs: this.ipSecurityLogs,
   }
 
   public getAuditLogs(filters?: { module?: string; action?: string; userId?: string }): AuditLog[] {
-    let logs = [...this.auditLogs];
+    let logs = this.loadedFromPersistedState ? [...this.auditLogs].filter(l => !isSeedAuditLog(l)) : [...this.auditLogs];
     if (filters?.module) logs = logs.filter(l => l.module === filters.module);
     if (filters?.action) logs = logs.filter(l => l.action === filters.action);
     if (filters?.userId) logs = logs.filter(l => l.userId === filters.userId);
@@ -472,10 +483,12 @@ ipSecurityLogs: this.ipSecurityLogs,
 
   // --- Users & Auth ---
   public getUsers(): User[] {
-    return Array.from(this.users.values()).map(u => {
-      const { passwordHash, ...safeUser } = u;
-      return safeUser as User;
-    });
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
   }
 
   public getUserById(id: string): User | undefined {
@@ -555,6 +568,79 @@ ipSecurityLogs: this.ipSecurityLogs,
       userRole: newUser.role,
       ipAddress: '127.0.0.1',
       details: `New user registered (${newUser.role})`
+    });
+
+    this.persist();
+
+    const { passwordHash, ...safe } = newUser;
+    return safe as User;
+  }
+
+  /**
+   * Secure citizen onboarding for a verified Clerk identity that has no existing
+   * SCIP account. Creates exactly one new citizen profile, links the Clerk
+   * subject, and never escalates role. Caller (route) must enforce that the
+   * Clerk identity is verified and that no existing SCIP account already matches.
+   */
+  public createClerkCitizen(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    clerkSubject: string;
+    residenceAddress?: string;
+  }): User {
+    const safeName = String(input.name || '').trim();
+    const safeEmail = String(input.email || '').toLowerCase().trim();
+    if (!safeName) throw new Error('Name is required.');
+    if (!safeEmail) throw new Error('Email is required.');
+    if (safeName.length > 100) throw new Error('Name must be 100 characters or fewer.');
+    if (safeEmail.length > 254) throw new Error('Email must be 254 characters or fewer.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) throw new Error('Invalid email format.');
+    if (typeof input.clerkSubject !== 'string' || input.clerkSubject.trim().length === 0) {
+      throw new Error('Clerk identity is required.');
+    }
+    if (input.phone !== undefined && (typeof input.phone !== 'string' || input.phone.trim().length > 30)) {
+      throw new Error('Phone must be 30 characters or fewer.');
+    }
+
+    // Deterministic duplicate guards: no existing SCIP account may match this
+    // email or Clerk identity. Never silently overwrite or merge.
+    const existingEmail = this.getUserByEmailWithPassword(safeEmail);
+    if (existingEmail) throw new Error(`Email ${safeEmail} is already registered.`);
+    const existingClerk = this.getUserByClerkId(input.clerkSubject);
+    if (existingClerk) throw new Error('Clerk identity is already linked to a SCIP account.');
+
+    const id = `USR-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+    const now = new Date().toISOString();
+    const newUser: User = {
+      id,
+      name: safeName,
+      email: safeEmail,
+      role: 'citizen',
+      phone: input.phone ? input.phone.trim() : undefined,
+      clerkUserId: input.clerkSubject,
+      status: 'active',
+      sessionVersion: 0,
+      credentialsResetRequired: false,
+      emailVerified: true,
+      phoneVerified: Boolean(input.phone && input.phone.trim().length > 0),
+      verificationAttempts: 0,
+      residenceAddress: typeof input.residenceAddress === 'string' ? input.residenceAddress.trim().slice(0, 500) : undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.users.set(id, newUser);
+
+    this.logAudit({
+      action: 'USER_CREATED',
+      module: 'auth',
+      recordId: id,
+      userId: id,
+      userEmail: newUser.email,
+      userRole: newUser.role,
+      ipAddress: '127.0.0.1',
+      details: `New citizen created via Clerk onboarding (clerkSubject=${input.clerkSubject})`
     });
 
     this.persist();
@@ -1025,7 +1111,7 @@ ipSecurityLogs: this.ipSecurityLogs,
     status?: string;
     urgency?: string;
   }): Report[] {
-    let list = Array.from(this.reports.values());
+    let list = Array.from(this.reports.values()).filter(r => !(this.loadedFromPersistedState && isHiddenReport(r)));
     if (filter?.citizenId) list = list.filter(r => r.citizenId === filter.citizenId);
     if (filter?.category) list = list.filter(r => r.category === filter.category);
     if (filter?.status) list = list.filter(r => r.status === filter.status);
@@ -1347,7 +1433,7 @@ ipSecurityLogs: this.ipSecurityLogs,
 
   // --- Incidents & Human Review ---
   public getIncidents(filter?: { status?: string; category?: string; priority?: string }): Incident[] {
-    let list = Array.from(this.incidents.values());
+    let list = Array.from(this.incidents.values()).filter(i => !(this.loadedFromPersistedState && isHiddenIncident(i)));
     if (filter?.status) list = list.filter(i => i.status === filter.status);
     if (filter?.category) list = list.filter(i => i.category === filter.category);
     if (filter?.priority) list = list.filter(i => i.priority === filter.priority);
@@ -1611,7 +1697,7 @@ ipSecurityLogs: this.ipSecurityLogs,
 
   // --- Notifications ---
   public getNotificationsForUser(userId: string): Notification[] {
-    return this.notifications.filter(n => n.userId === userId);
+    return this.notifications.filter(n => n.userId === userId && !(this.loadedFromPersistedState && isHiddenNotification(n)));
   }
 
   public createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>): Notification {
@@ -1652,12 +1738,12 @@ ipSecurityLogs: this.ipSecurityLogs,
   }
 
   public getFeedbacks(): Feedback[] {
-    return this.feedbacks;
+    return this.loadedFromPersistedState ? this.feedbacks.filter(f => !isHiddenFeedback(f)) : this.feedbacks;
   }
 
   // --- Field Officer Inspections ---
   public getInspections(incidentId?: string): InspectionRecord[] {
-    const list = Array.from(this.inspections.values());
+    const list = Array.from(this.inspections.values()).filter(i => !(this.loadedFromPersistedState && isHiddenInspection(i)));
     if (incidentId) {
       return list.filter(i => i.incidentId === incidentId);
     }

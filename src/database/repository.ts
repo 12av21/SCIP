@@ -41,6 +41,20 @@ export interface IScipRepository {
   // clerk identity linking (Phase 3.1.3)
   linkClerkIdentity(scipUserId: string, clerkSubject: string): Promise<{ linked: boolean; reason?: string }> | { linked: boolean; reason?: string };
   createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }): Promise<ClerkIdentityLink> | ClerkIdentityLink;
+
+  /**
+   * Secure citizen onboarding for a verified Clerk identity that has no existing
+   * SCIP account. Creates exactly one new citizen profile, links the Clerk
+   * subject, and never escalates role. Caller (route) must enforce that the
+   * Clerk identity is verified and that no existing SCIP account already matches.
+   */
+  createClerkCitizen(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    clerkSubject: string;
+    residenceAddress?: string;
+  }): Promise<User> | User;
   getClerkLinkById(id: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
   getClerkLinkBySubject(clerkSubject: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
   getClerkLinksByScipUser(scipUserId: string): Promise<ClerkIdentityLink[]> | ClerkIdentityLink[];

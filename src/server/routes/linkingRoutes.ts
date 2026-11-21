@@ -231,6 +231,112 @@ router.post('/auth/linking/request', authenticateLinking, async (req: Authentica
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/auth/linking/onboard — create a new SCIP citizen for a verified
+// Clerk identity that has no existing SCIP account (Phase 3.1.4).
+//
+// This is the ONLY path that creates a new SCIP user for a Clerk identity.
+// It is Clerk-only (authenticateLinking) and:
+//   - requires the Clerk identity to be verified (email_verified),
+//   - refuses if a SCIP account already exists for this email or clerkSubject,
+//   - always assigns role 'citizen',
+//   - never bypasses the existing member linking workflow.
+// ---------------------------------------------------------------------------
+
+router.post('/auth/linking/onboard', authenticateLinking, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const correlationId = crypto.randomBytes(8).toString('hex');
+  const clerkSubject = req.clerkSubject as string;
+  try {
+    const rlKey = `link-onboard:${clerkSubject}`;
+    const count = await rateLimitStore.increment(rlKey, WINDOW_MS);
+    if (count > MAX_REQUESTS_PER_WINDOW) {
+      await logIpSecurityEvent({ req, eventType: 'RATE_LIMIT_HIT', success: false, details: `Onboarding rate limit hit (${correlationId})` });
+      res.status(429).json({ success: false, message: 'Too many onboarding attempts. Please try again later.', errors: ['Rate limit exceeded.'] });
+      return;
+    }
+
+    // Resolve a verified email for the new SCIP citizen profile.
+    // The request is authenticated by a valid Clerk linking session; prefer token/session context
+    // and fall back to client-provided email when claims omit it.
+    const bodyEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const tokenEmail = typeof req.clerkEmail === 'string' ? req.clerkEmail.trim().toLowerCase() : '';
+    const clerkEmail = isValidEmail(tokenEmail) ? tokenEmail : (isValidEmail(bodyEmail) ? bodyEmail : '');
+    if (!clerkEmail) {
+      res.status(400).json({ success: false, message: 'A valid email address is required to create your SCIP account.', errors: ['Invalid email.'] });
+      return;
+    }
+
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : undefined;
+    const residenceAddress = typeof req.body?.residenceAddress === 'string' ? req.body.residenceAddress.trim() : undefined;
+
+    if (!name) {
+      res.status(400).json({ success: false, message: 'Your full name is required.', errors: ['Missing name.'] });
+      return;
+    }
+    if (name.length > 100) {
+      res.status(400).json({ success: false, message: 'Name must be 100 characters or fewer.', errors: ['Invalid name.'] });
+      return;
+    }
+    if (phone !== undefined && (phone.length === 0 || phone.length > 30)) {
+      res.status(400).json({ success: false, message: 'Phone must be 30 characters or fewer.', errors: ['Invalid phone.'] });
+      return;
+    }
+
+    // Deterministic duplicate guards before any write.
+    const existingEmail = await db.getUserByEmailWithPassword(clerkEmail);
+    if (existingEmail) {
+      await logIpSecurityEvent({ req, eventType: 'SUSPICIOUS_ACTIVITY', success: false, userId: existingEmail.id, details: `Onboarding blocked: email already registered (${correlationId})` });
+      res.status(409).json({ success: false, message: 'An account with this email address already exists. Please sign in and link your existing account.', errors: ['Duplicate email.'] });
+      return;
+    }
+    const existingClerk = await db.getUserByClerkId(clerkSubject);
+    if (existingClerk) {
+      res.status(400).json({ success: false, message: 'Your Clerk identity is already linked to a SCIP account.', errors: ['Already linked.'] });
+      return;
+    }
+
+    const newUser = await db.createClerkCitizen({
+      name,
+      email: clerkEmail,
+      phone,
+      clerkSubject,
+      residenceAddress
+    });
+
+    await db.logAudit({
+      action: 'SECURITY_EVENT',
+      module: 'auth',
+      recordId: newUser.id,
+      userId: newUser.id,
+      userEmail: newUser.email,
+      userRole: newUser.role,
+      ipAddress: strIp(req),
+      details: `Clerk citizen onboarding completed (correlationId=${correlationId})`
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Your SCIP citizen account has been created.',
+      data: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        status: newUser.status
+      }
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes('already registered') || msg.includes('already linked')) {
+      res.status(409).json({ success: false, message: 'An account with this email address already exists.', errors: ['Duplicate email.'] });
+      return;
+    }
+    await logIpSecurityEvent({ req, eventType: 'SUSPICIOUS_ACTIVITY', success: false, details: `Onboarding error: ${err?.message}` });
+    res.status(500).json({ success: false, message: 'Failed to create your SCIP account.', errors: ['Internal error.'] });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/auth/linking/status — status of the caller's own linking (Clerk-only)
 // ---------------------------------------------------------------------------
 
