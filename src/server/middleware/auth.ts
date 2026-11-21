@@ -3,6 +3,7 @@
 // SCIP remains the application data source and RBAC authority.
 
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { verifyToken } from '@clerk/backend';
 import { db } from '../../database/index.js';
 import { isDuplicateClerkIdentityError } from '../../database/identityErrors.js';
@@ -196,7 +197,14 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = '';
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:^|;\s*)scip_token=([^;]+)/);
+    if (match) token = decodeURIComponent(match[1]);
+  }
+  if (!token) {
     await logIpSecurityEvent({
       req, eventType: 'LOGIN_FAILED', success: false,
       details: 'Missing or malformed Authorization header'
@@ -209,7 +217,24 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
     return;
   }
 
-  const token = authHeader.split(' ')[1];
+  // Native auth path (when AUTH_PROVIDER=native)
+  if ((process.env.AUTH_PROVIDER || 'clerk').toLowerCase() === 'native') {
+    try {
+      const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY || 'dev-secret-change-in-production';
+      const payload: any = jwt.verify(token, JWT_SECRET);
+      const user = await db.getUserById(payload.sub);
+      if (!user || user.status !== 'active') {
+        res.status(401).json({ success: false, message: 'Invalid or expired session.', errors: ['Invalid session.'] });
+        return;
+      }
+      req.user = user;
+      next();
+      return;
+    } catch (err: any) {
+      res.status(401).json({ success: false, message: 'Invalid or expired session.', errors: ['Invalid session.'] });
+      return;
+    }
+  }
 
   try {
     const clerk = await verifyClerkToken(token);

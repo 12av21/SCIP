@@ -170,8 +170,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      await login(loginEmail, loginPassword);
-      completeLogin(loginEmail);
+      const loggedInUser = await login(loginEmail, loginPassword);
+      if (loggedInUser && loggedInUser.role) {
+        const roleMap: Record<string, string> = {
+          citizen: 'citizen',
+          field_officer: 'officer',
+          officer: 'officer',
+          dept_officer: 'dept_officer',
+          analyst: 'analyst',
+          authority: 'authority',
+          admin: 'admin'
+        };
+        navigateForRole((roleMap[loggedInUser.role] || 'citizen') as any);
+      } else {
+        completeLogin(loginEmail);
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Invalid credentials. Please verify your email and password.');
     } finally {

@@ -36,6 +36,8 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
 }) => {
   const { user } = useAuth();
   const [reports, setReports] = useState<Report[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,8 +71,10 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
     try {
       const rep = await api.getReports({ myOnly: true });
       const inc = await api.getIncidents();
+      const notifRes = await api.getNotifications().catch(() => null);
       setReports(rep || []);
       setIncidents(inc || []);
+      if (notifRes) { setNotifications(notifRes.data || []); setUnreadCount(notifRes.unreadCount || 0); }
     } catch (err: any) {
       setLoadError(err?.message || 'Failed to load dashboard data. Please retry.');
     } finally {

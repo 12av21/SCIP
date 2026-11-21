@@ -4,11 +4,58 @@
 // SCIP routes: /me (current user), /logout (session invalidation), /profile (profile update), /account (deletion).
 
 import { Router, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, logIpSecurityEvent } from '../middleware/auth.js';
 import { User } from '../../types/scip.js';
 
+const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY || 'dev-secret-change-in-production';
+const AUTH_PROVIDER = (process.env.AUTH_PROVIDER || 'clerk').toLowerCase();
+
 const router = Router();
+
+// Native auth endpoints only available when AUTH_PROVIDER=native
+// When using Clerk (default), auth is delegated to Clerk and these endpoints return 404
+if (AUTH_PROVIDER === 'native') {
+  // Native auth: register
+  router.post('/register', async (req: any, res: Response): Promise<void> => {
+  try {
+    const { name, email, password, phone } = req.body || {};
+    if (!name || !email || !password) { res.status(400).json({ success: false, message: 'Name, email and password are required.' }); return; }
+    if (password.length < 8) { res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' }); return; }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await db.getUserByEmailWithPassword(normalizedEmail);
+    if (existing) { res.status(409).json({ success: false, message: 'An account with this email already exists.' }); return; }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await db.createUser({ name: name.trim(), email: normalizedEmail, passwordHash, role: 'citizen', status: 'active', phone: phone?.trim() } as any);
+    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('scip_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*24*60*60*1000 });
+    res.status(201).json({ success: true, message: 'Registration successful.', data: { user: sanitizeAuthUser(user) } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Registration failed.' : err.message });
+  }
+});
+
+// Native auth: login
+router.post('/login', async (req: any, res: Response): Promise<void> => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) { res.status(400).json({ success: false, message: 'Email and password are required.' }); return; }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await db.getUserByEmailWithPassword(normalizedEmail);
+    if (!user || !user.passwordHash) { res.status(401).json({ success: false, message: 'Invalid email or password.' }); return; }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) { res.status(401).json({ success: false, message: 'Invalid email or password.' }); return; }
+    if (user.status !== 'active') { res.status(403).json({ success: false, message: 'Account is not active.' }); return; }
+    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('scip_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*24*60*60*1000 });
+    res.json({ success: true, message: 'Login successful.', data: { user: sanitizeAuthUser(user) } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Login failed.' : err.message });
+  }
+});
+} // End of AUTH_PROVIDER === 'native' block
 
 // Explicit allowlist of User fields safe to return to the authenticated owner.
 // Never expose password hashes, session state, verification secrets, or internal
@@ -47,7 +94,8 @@ router.post('/logout', authenticate, async (req: AuthenticatedRequest, res: Resp
     });
     await db.logAudit({ action: 'LOGOUT', module: 'auth', userId: req.user.id, userEmail: req.user.email, userRole: req.user.role, ipAddress: req.ip || '127.0.0.1', details: 'User logged out via Clerk' });
   }
-  res.json({ success: true, message: 'Logged out successfully.', redirect: `${process.env.CLERK_LOGOUT_URL || '/sign-in'}` });
+  res.clearCookie('scip_token');
+  res.json({ success: true, message: 'Logged out successfully.', redirect: '/login' });
 });
 
 // PUT /api/auth/profile — authenticated profile update

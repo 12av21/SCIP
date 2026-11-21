@@ -123,6 +123,7 @@ class APIClient {
       const res = await fetch(endpoint, {
         ...options,
         headers,
+        credentials: 'include',
         signal: controller.signal
       });
 

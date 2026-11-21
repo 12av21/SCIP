@@ -10,7 +10,7 @@ interface AuthContextType {
   role: UserRole;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User | null>;
   sendLoginEmailCode: (email: string) => Promise<void>;
   verifyLoginEmailCode: (code: string) => Promise<void>;
   register: (params: { name: string; email: string; phone?: string; password: string }) => Promise<'complete' | 'verification_required'>;
@@ -132,12 +132,25 @@ async function getClerkToken(): Promise<string | null> {
 }
 
 async function fetchScipUser(): Promise<User | null> {
-  const token = await getClerkToken();
-  if (!token) return null;
+  const clerk = (window as any).__scip_clerk__;
+  if (clerk) {
+    const token = await getClerkToken();
+    if (!token) return null;
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include'
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.data || null;
+    } catch {
+      return null;
+    }
+  }
+  // Native auth path: cookie-based session
   try {
-    const res = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await fetch('/api/auth/me', { credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json();
     return data.data || null;
@@ -171,7 +184,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     const clerk = (window as any).__scip_clerk__;
-    if (!clerk) throw new Error('Clerk not initialized');
+    if (!clerk) {
+      // Native auth path
+      const res = await fetch('/api/auth/login', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Login failed');
+      const scipUser = await fetchScipUser();
+      setUser(scipUser);
+      return scipUser;
+    }
     const signIn = clerk.client?.signIn;
     if (!signIn) throw new Error('Clerk sign-in unavailable');
     const attempt = await signIn.create({ identifier: email, password, strategy: 'password' });
@@ -183,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     const scipUser = await fetchScipUser();
     setUser(scipUser);
+    return scipUser;
   };
 
   const sendLoginEmailCode = async (email: string) => {
@@ -212,7 +234,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (params: { name: string; email: string; phone?: string; password: string }) => {
     const clerk = (window as any).__scip_clerk__;
-    if (!clerk) throw new Error('Clerk not initialized');
+    if (!clerk) {
+      // Native auth path
+      const res = await fetch('/api/auth/register', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: params.name, email: params.email, password: params.password }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Registration failed');
+      return 'complete';
+    }
     const signUp = clerk.client?.signUp;
     if (!signUp) throw new Error('Clerk sign-up unavailable');
     const nameParts = params.name.trim().split(/\s+/);

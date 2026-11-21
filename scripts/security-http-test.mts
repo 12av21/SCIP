@@ -98,10 +98,12 @@ try {
     ok('mongo runtime active on isolated test db', info.activeDriver === 'mongo' && info.mongoRepositoryIntegrated === true && info.fallbackReason == null, JSON.stringify(info));
   }
   const users = await db.getUsers();
-  const admin = users.find((u: any) => u.role === 'admin')!;
+  const admin = users.find((u: any) => u.role === 'admin');
+  if (!admin) throw new Error('Test setup failed: no admin user in seed data');
   const authority = users.find((u: any) => u.role === 'authority') || admin;
   const analyst = users.find((u: any) => u.role === 'analyst') || admin;
-  const citizen = users.find((u: any) => u.role === 'citizen')!;
+  const citizen = users.find((u: any) => u.role === 'citizen');
+  if (!citizen) throw new Error('Test setup failed: no citizen user in seed data');
   const otherCitizen = users.find((u: any) => u.role === 'citizen' && u.id !== citizen.id) || null;
   const officer = users.find((u: any) => u.role === 'officer') || admin;
   const deptOfficer = users.find((u: any) => u.role === 'dept_officer') || admin;
