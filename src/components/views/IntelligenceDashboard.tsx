@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/apiClient';
 import { Incident, Report, SpatioTemporalCluster } from '../../types/scip';
-import { GeospatialMap } from '../map/GeospatialMap';
+import { UnifiedMap } from '../map/UnifiedMap';
 import {
   Radio,
   AlertTriangle,
@@ -173,7 +173,7 @@ export const IntelligenceDashboard: React.FC<IntelligenceDashboardProps> = ({
           </button>
         </div>
 
-        <GeospatialMap
+        <UnifiedMap
           reports={reports}
           incidents={incidents}
           onSelectIncident={onSelectIncident}

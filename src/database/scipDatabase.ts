@@ -35,7 +35,14 @@ import {
   ComplaintLocation,
   LocationSource,
   ClerkIdentityLink,
-  ClerkLinkVerificationMethod
+  ClerkLinkVerificationMethod,
+  NotificationTemplate,
+  NotificationPreference,
+  NotificationEventType,
+  NotificationChannel,
+  NotificationPriority,
+  NotificationFilters,
+  NotificationStats
 } from '../types/scip.js';
 import {
   SEED_DEPARTMENTS,
@@ -84,6 +91,8 @@ export class SCIPDatabase {
   private resolutions: Map<string, Resolution> = new Map();
   private inspections: Map<string, InspectionRecord> = new Map();
   private notifications: Notification[] = [];
+  private notificationPreferences: Map<string, NotificationPreference> = new Map();
+  private notificationTemplates: Map<string, NotificationTemplate> = new Map();
   private feedbacks: Feedback[] = [];
   private auditLogs: AuditLog[] = [];
   private riskScores: Map<string, RiskScore> = new Map();
@@ -123,6 +132,8 @@ export class SCIPDatabase {
           (data.resolutions || []).forEach((res: Resolution) => this.resolutions.set(res.id, res));
           (data.inspections || []).forEach((insp: InspectionRecord) => this.inspections.set(insp.id, insp));
           this.notifications = data.notifications || [];
+          (data.notificationPreferences || []).forEach((p: NotificationPreference) => this.notificationPreferences.set(p.userId, p));
+          (data.notificationTemplates || []).forEach((t: NotificationTemplate) => this.notificationTemplates.set(t.id, t));
           this.feedbacks = data.feedbacks || [];
           this.auditLogs = data.auditLogs || [];
           this.ipSecurityLogs = data.ipSecurityLogs || [];
@@ -195,7 +206,7 @@ export class SCIPDatabase {
     }
   }
 
-  public persist(): void {
+public persist(): void {
     try {
       const payload = {
         users: Array.from(this.users.values()),
@@ -207,9 +218,11 @@ export class SCIPDatabase {
         resolutions: Array.from(this.resolutions.values()),
         inspections: Array.from(this.inspections.values()),
         notifications: this.notifications,
+        notificationPreferences: Array.from(this.notificationPreferences.values()),
+        notificationTemplates: Array.from(this.notificationTemplates.values()),
         feedbacks: this.feedbacks,
         auditLogs: this.auditLogs,
-ipSecurityLogs: this.ipSecurityLogs,
+        ipSecurityLogs: this.ipSecurityLogs,
         clerkLinks: Array.from(this.clerkLinks.values()),
         adminStates: Array.from(this.adminStates.values()),
         adminDistricts: Array.from(this.adminDistricts.values()),
@@ -387,6 +400,82 @@ ipSecurityLogs: this.ipSecurityLogs,
     SEED_INCIDENTS.forEach(i => this.incidents.set(i.id, { ...i }));
     SEED_INSPECTIONS.forEach(i => this.inspections.set(i.id, { ...i }));
 
+    // Initialize default notification templates
+    const defaultTemplates: NotificationTemplate[] = [
+      {
+        id: 'tmpl_incident_created',
+        eventType: 'incident_created',
+        name: 'Incident Created',
+        description: 'Sent when a new incident is created from reports',
+        channels: ['in_app', 'email'],
+        subject: 'New Incident Created: {{incidentId}}',
+        emailTemplate: `
+          <h2>New Incident Created</h2>
+          <p>An incident has been created from citizen reports.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Location:</strong> {{location}}</p>
+          <p><strong>Priority:</strong> {{priority}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">View Incident</a></p>
+        `,
+        smsTemplate: 'SCIP Alert: New incident {{incidentId}} created ({{category}}) at {{location}}. Priority: {{priority}}',
+        inAppTemplate: 'New incident {{incidentId}} created ({{category}}) at {{location}}',
+        priority: 'high',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tmpl_incident_assigned',
+        eventType: 'incident_assigned',
+        name: 'Incident Assigned',
+        description: 'Sent when an incident is assigned to a field officer or department',
+        channels: ['in_app', 'email', 'sms'],
+        subject: 'Incident Assigned: {{incidentId}}',
+        emailTemplate: `
+          <h2>Incident Assigned to You</h2>
+          <p>You have been assigned to handle an incident.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Location:</strong> {{location}}</p>
+          <p><strong>Priority:</strong> {{priority}}</p>
+          <p><strong>SLA Deadline:</strong> {{slaDeadline}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">View Incident</a></p>
+        `,
+        smsTemplate: 'SCIP: Incident {{incidentId}} assigned to you. {{category}} at {{location}}. Priority: {{priority}}. SLA: {{slaDeadline}}',
+        inAppTemplate: 'Incident {{incidentId}} assigned to you ({{category}}, {{priority}})',
+        priority: 'high',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tmpl_incident_sla_breach',
+        eventType: 'incident_sla_breach',
+        name: 'SLA Breach Alert',
+        description: 'Sent when an incident SLA deadline is breached or at risk',
+        channels: ['in_app', 'email', 'sms'],
+        subject: 'SLA BREACH: Incident {{incidentId}}',
+        emailTemplate: `
+          <h2 style="color: #dc2626;">SLA BREACH ALERT</h2>
+          <p>An incident has breached or is at risk of breaching its SLA deadline.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Assigned To:</strong> {{assignedTo}}</p>
+          <p><strong>SLA Deadline:</strong> {{slaDeadline}}</p>
+          <p><strong>Time Overdue:</strong> {{timeOverdue}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">Take Action Now</a></p>
+        `,
+        smsTemplate: 'SCIP SLA ALERT: Incident {{incidentId}} SLA breached. {{timeOverdue}} overdue. Assigned to {{assignedTo}}',
+        inAppTemplate: 'SLA BREACH: Incident {{incidentId}} - {{timeOverdue}} overdue',
+        priority: 'critical',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+    defaultTemplates.forEach(t => this.notificationTemplates.set(t.id, t));
+
     // Populate seed audit logs with hash chain
     SEED_AUDIT_LOGS.forEach(l => {
       this.logAudit({
@@ -486,6 +575,26 @@ ipSecurityLogs: this.ipSecurityLogs,
   public getUsers(): User[] {
     return Array.from(this.users.values())
       .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
+  }
+
+  public findUsersByDepartment(departmentId: string): User[] {
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .filter(u => u.departmentId === departmentId)
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
+  }
+
+  public findUsersByRole(role: UserRole): User[] {
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .filter(u => u.role === role)
       .map(u => {
         const { passwordHash, ...safeUser } = u;
         return safeUser as User;
@@ -1179,10 +1288,14 @@ ipSecurityLogs: this.ipSecurityLogs,
     // Notify citizen
     this.createNotification({
       userId: report.citizenId,
+      eventType: 'report_submitted',
       title: 'Report Received & Analyzed',
       message: `Your report ${id} was logged. AI identified category as "${analysis.categoryPredicted}" (${(analysis.categoryConfidence * 100).toFixed(0)}% confidence).`,
-      type: 'report_status',
-      link: id
+      channels: ['in_app'],
+      priority: 'medium',
+      data: { reportId: id, category: analysis.categoryPredicted },
+      relatedEntityId: id,
+      relatedEntityType: 'report'
     });
 
     this.persist();
@@ -1302,10 +1415,14 @@ ipSecurityLogs: this.ipSecurityLogs,
 
     this.createNotification({
       userId: report.citizenId,
+      eventType: 'report_status_changed',
       title: 'Report Withdrawn',
       message: `Your report ${id} has been marked as withdrawn/closed.`,
-      type: 'report_status',
-      link: id
+      channels: ['in_app'],
+      priority: 'medium',
+      data: { reportId: id, newStatus: 'withdrawn' },
+      relatedEntityId: id,
+      relatedEntityType: 'report'
     });
 
     this.persist();
@@ -1673,10 +1790,14 @@ ipSecurityLogs: this.ipSecurityLogs,
         // Notify citizen
         this.createNotification({
           userId: r.citizenId,
+          eventType: 'report_resolved',
           title: 'Incident Resolved',
           message: `The incident affecting your report ${r.id} has been resolved by municipal authorities. Resolution: "${resolutionData.actionTaken}".`,
-          type: 'resolution',
-          link: r.id
+          channels: ['in_app', 'email', 'sms'],
+          priority: 'high',
+          data: { reportId: r.id, incidentId: incidentId, resolution: resolutionData.actionTaken },
+          relatedEntityId: r.id,
+          relatedEntityType: 'report'
         });
       }
     }
@@ -1696,6 +1817,173 @@ ipSecurityLogs: this.ipSecurityLogs,
     return incident;
   }
 
+  public closeIncident(incidentId: string, closer: User, notes?: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved') {
+      throw new Error('Only resolved incidents can be closed. Current status: ' + incident.status);
+    }
+    if (closer.role === 'dept_officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (closer.role === 'officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+
+    const now = new Date().toISOString();
+    incident.status = 'closed';
+    incident.updatedAt = now;
+    if (notes) {
+      incident.resolutionNotes = (incident.resolutionNotes || '') + `\n[CLOSED by ${closer.name}]: ${notes}`;
+    }
+
+    this.logAudit({
+      action: 'INCIDENT_RESOLVED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: closer.id,
+      userEmail: closer.email,
+      userRole: closer.role,
+      ipAddress: '127.0.0.1',
+      details: `Closed incident ${incidentId}${notes ? ': ' + notes : ''}`
+    });
+
+    // Notify assigned officer and department
+    if (incident.assignedOfficerId) {
+      this.createNotification({
+        userId: incident.assignedOfficerId,
+        eventType: 'incident_closed',
+        title: 'Incident Closed',
+        message: `Incident ${incidentId} has been officially closed.${notes ? ' Notes: ' + notes : ''}`,
+        channels: ['in_app', 'email'],
+        priority: 'medium',
+        data: { incidentId, notes },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
+      });
+    }
+
+    this.persist();
+    return incident;
+  }
+
+  public reopenIncident(incidentId: string, reopener: User, reason: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      throw new Error('Only resolved or closed incidents can be reopened. Current status: ' + incident.status);
+    }
+    if (reopener.role === 'dept_officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (reopener.role === 'officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (typeof reason !== 'string' || !reason.trim()) {
+      throw new Error('Reopening reason is required.');
+    }
+
+    const now = new Date().toISOString();
+    incident.status = 'in_progress';
+    incident.resolutionNotes = (incident.resolutionNotes || '') + `\n[REOPENED by ${reopener.name} on ${now}]: ${reason.trim()}`;
+    incident.resolvedAt = undefined;
+    incident.updatedAt = now;
+
+    this.logAudit({
+      action: 'INCIDENT_REVIEWED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: reopener.id,
+      userEmail: reopener.email,
+      userRole: reopener.role,
+      ipAddress: '127.0.0.1',
+      details: `Reopened incident ${incidentId}. Reason: ${reason.trim()}`
+    });
+
+    // Notify assigned officer
+    if (incident.assignedOfficerId) {
+      this.createNotification({
+        userId: incident.assignedOfficerId,
+        eventType: 'incident_reopened',
+        title: 'Incident Reopened',
+        message: `Incident ${incidentId} has been reopened: "${reason.trim()}"`,
+        channels: ['in_app', 'email', 'sms'],
+        priority: 'high',
+        data: { incidentId, reason: reason.trim() },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
+      });
+    }
+
+    // Notify citizens on linked reports
+    for (const rId of incident.reportIds) {
+      const r = this.reports.get(rId);
+      if (r) {
+        r.status = 'under_review';
+        this.reports.set(rId, r);
+        this.createNotification({
+          userId: r.citizenId,
+          eventType: 'incident_reopened',
+          title: 'Incident Reopened',
+          message: `The incident linked to your report ${rId} has been reopened for further investigation.`,
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId, reportId: rId },
+          relatedEntityId: rId,
+          relatedEntityType: 'report'
+        });
+      }
+    }
+
+    this.persist();
+    return incident;
+  }
+
+  public verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      throw new Error('Resolution can only be verified for resolved or closed incidents.');
+    }
+
+    const report = incident.reportIds.map(rId => this.reports.get(rId)).find(r => r?.citizenId === citizenId);
+    if (!report) throw new Error('Citizen not associated with this incident.');
+
+    const resolution = Array.from(this.resolutions.values()).find(r => r.incidentId === incidentId);
+    if (!resolution) throw new Error('No resolution record found for this incident.');
+
+    resolution.citizenVerified = verified;
+    if (comments) {
+      resolution.actionTaken += `\n[Citizen Verification]: ${comments}`;
+    }
+
+    this.logAudit({
+      action: 'INCIDENT_RESOLVED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: citizenId,
+      userEmail: report.citizenEmail,
+      userRole: 'citizen',
+      ipAddress: '127.0.0.1',
+      details: `Citizen ${verified ? 'verified' : 'disputed'} resolution for incident ${incidentId}${comments ? ': ' + comments : ''}`
+    });
+
+    this.createNotification({
+      userId: incident.assignedOfficerId || '',
+      eventType: 'incident_verified',
+      title: 'Resolution ' + (verified ? 'Verified' : 'Disputed') + ' by Citizen',
+      message: `Citizen ${verified ? 'confirmed' : 'disputed'} the resolution for incident ${incidentId}.${comments ? ' Comments: ' + comments : ''}`,
+      channels: ['in_app', 'email'],
+      priority: 'medium',
+      data: { incidentId, verified, comments },
+      relatedEntityId: incidentId,
+      relatedEntityType: 'incident'
+    });
+
+    this.persist();
+    return incident;
+  }
+
   // --- Notifications ---
   public getNotificationsForUser(userId: string): Notification[] {
     return this.notifications.filter(n => n.userId === userId && !(this.loadedFromPersistedState && isHiddenNotification(n)));
@@ -1706,6 +1994,9 @@ ipSecurityLogs: this.ipSecurityLogs,
       ...data,
       id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       read: false,
+      emailSent: false,
+      smsSent: false,
+      pushSent: false,
       createdAt: new Date().toISOString()
     };
     this.notifications.unshift(notif);
@@ -1724,6 +2015,128 @@ ipSecurityLogs: this.ipSecurityLogs,
   public markAllNotificationsAsRead(userId: string): void {
     this.notifications.filter(n => n.userId === userId).forEach(n => { n.read = true; });
     this.persist();
+  }
+
+  public findNotificationById(id: string): Notification | undefined {
+    return this.notifications.find(n => n.id === id);
+  }
+
+  public updateNotification(id: string, notification: Notification): Notification {
+    const index = this.notifications.findIndex(n => n.id === id);
+    if (index >= 0) {
+      this.notifications[index] = notification;
+      this.persist();
+      return notification;
+    }
+    throw new Error(`Notification ${id} not found`);
+  }
+
+  public deleteNotification(id: string): boolean {
+    const index = this.notifications.findIndex(n => n.id === id);
+    if (index >= 0) {
+      this.notifications.splice(index, 1);
+      this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  public findNotificationsByUser(userId: string, filters?: NotificationFilters): Notification[] {
+    let results = this.notifications.filter(n => n.userId === userId && !(this.loadedFromPersistedState && isHiddenNotification(n)));
+
+    if (filters) {
+      if (filters.eventType) {
+        results = results.filter(n => n.eventType === filters.eventType);
+      }
+      if (filters.channels?.length) {
+        results = results.filter(n => n.channels.some(c => filters.channels!.includes(c)));
+      }
+      if (filters.priority) {
+        results = results.filter(n => n.priority === filters.priority);
+      }
+      if (filters.read !== undefined) {
+        results = results.filter(n => n.read === filters.read);
+      }
+      if (filters.dateFrom) {
+        results = results.filter(n => n.createdAt >= filters.dateFrom!);
+      }
+      if (filters.dateTo) {
+        results = results.filter(n => n.createdAt <= filters.dateTo!);
+      }
+      if (filters.relatedEntityId) {
+        results = results.filter(n => n.relatedEntityId === filters.relatedEntityId);
+      }
+      if (filters.relatedEntityType) {
+        results = results.filter(n => n.relatedEntityType === filters.relatedEntityType);
+      }
+      if (filters.limit) {
+        results = results.slice(filters.offset || 0, (filters.offset || 0) + filters.limit);
+      }
+    }
+
+    return results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public getNotificationStats(userId: string): NotificationStats {
+    const notifications = this.notifications.filter(n => n.userId === userId);
+    const stats: NotificationStats = {
+      total: notifications.length,
+      unread: notifications.filter(n => !n.read).length,
+      byType: {} as Record<NotificationEventType, number>,
+      byChannel: {} as Record<NotificationChannel, number>,
+      byPriority: {} as Record<NotificationPriority, number>
+    };
+
+    for (const n of notifications) {
+      stats.byType[n.eventType] = (stats.byType[n.eventType] || 0) + 1;
+      for (const c of n.channels) {
+        stats.byChannel[c] = (stats.byChannel[c] || 0) + 1;
+      }
+      stats.byPriority[n.priority] = (stats.byPriority[n.priority] || 0) + 1;
+    }
+
+    return stats;
+  }
+
+  public findNotificationPreferencesByUserId(userId: string): NotificationPreference | undefined {
+    return this.notificationPreferences.get(userId);
+  }
+
+  public upsertNotificationPreferences(prefs: NotificationPreference): NotificationPreference {
+    this.notificationPreferences.set(prefs.userId, prefs);
+    this.persist();
+    return prefs;
+  }
+
+  public findAllNotificationTemplates(): NotificationTemplate[] {
+    return Array.from(this.notificationTemplates.values());
+  }
+
+  public findNotificationTemplateById(id: string): NotificationTemplate | undefined {
+    return this.notificationTemplates.get(id);
+  }
+
+  public findNotificationTemplateByEventType(eventType: NotificationEventType): NotificationTemplate | undefined {
+    return Array.from(this.notificationTemplates.values()).find(t => t.eventType === eventType);
+  }
+
+  public createNotificationTemplate(template: NotificationTemplate): NotificationTemplate {
+    this.notificationTemplates.set(template.id, template);
+    this.persist();
+    return template;
+  }
+
+  public updateNotificationTemplate(id: string, template: NotificationTemplate): NotificationTemplate {
+    if (!this.notificationTemplates.has(id)) {
+      throw new Error(`Template ${id} not found`);
+    }
+    this.notificationTemplates.set(id, template);
+    this.persist();
+    return template;
+  }
+
+  public deleteNotificationTemplate(id: string): boolean {
+    return this.notificationTemplates.delete(id);
   }
 
   // --- Feedback ---
@@ -1809,10 +2222,14 @@ ipSecurityLogs: this.ipSecurityLogs,
     for (const doff of deptOfficers) {
       this.createNotification({
         userId: doff.id,
+        eventType: 'incident_updated',
         title: 'New Field Inspection Submitted',
         message: `Field officer ${officer.name} submitted inspection ${newRecord.id} for incident ${incident.id}. Requires verification.`,
-        type: 'incident_alert',
-        link: incident.id
+        channels: ['in_app', 'email'],
+        priority: 'medium',
+        data: { incidentId: incident.id, inspectionId: newRecord.id, officerId: officer.id, officerName: officer.name },
+        relatedEntityId: incident.id,
+        relatedEntityType: 'incident'
       });
     }
 
@@ -1925,10 +2342,14 @@ ipSecurityLogs: this.ipSecurityLogs,
 
     this.createNotification({
       userId: officerId,
+      eventType: 'incident_assigned',
       title: 'New Incident Work Order Assigned',
       message: `You have been assigned as lead field investigator for incident ${incidentId} (${incident.title}).`,
-      type: 'assignment',
-      link: incidentId
+      channels: ['in_app', 'email', 'sms'],
+      priority: 'high',
+      data: { incidentId, incidentTitle: incident.title, departmentId, departmentName: dept?.name || departmentId },
+      relatedEntityId: incidentId,
+      relatedEntityType: 'incident'
     });
 
     this.logAudit({
@@ -1979,10 +2400,14 @@ ipSecurityLogs: this.ipSecurityLogs,
     for (const auth of authorities) {
       this.createNotification({
         userId: auth.id,
+        eventType: 'incident_escalated',
         title: 'CRITICAL ESCALATION: Incident P1 Priority',
         message: `Incident ${incidentId} escalated by ${user.name}: "${reason}"`,
-        type: 'incident_alert',
-        link: incidentId
+        channels: ['in_app', 'email', 'sms'],
+        priority: 'critical',
+        data: { incidentId, reason, escalatedBy: user.name },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
       });
     }
 

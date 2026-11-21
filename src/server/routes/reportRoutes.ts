@@ -452,10 +452,14 @@ router.post(
       const updated = await db.updateReport(req.params.id, { status: 'closed' }, req.user!);
       await db.createNotification({
         userId: report.citizenId,
+        eventType: 'report_status_changed',
         title: 'Report Rejected by Authority',
         message: `Your report ${report.id} was reviewed and rejected. Reason: "${reason.trim().slice(0, 500)}"`,
-        type: 'report_status',
-        link: report.id
+        channels: ['in_app'],
+        priority: 'medium',
+        data: { reportId: report.id, newStatus: 'rejected', reason: reason.trim().slice(0, 500) },
+        relatedEntityId: report.id,
+        relatedEntityType: 'report'
       });
 
       await db.logAudit({

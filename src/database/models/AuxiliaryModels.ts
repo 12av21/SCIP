@@ -92,6 +92,78 @@ NotificationSchema.index({ userId: 1, read: 1 });
 
 export const NotificationModel = mongoose.models.Notification || mongoose.model<INotificationDocument>('Notification', NotificationSchema);
 
+// --- Notification Preference ---
+export interface INotificationPreferenceDocument extends Document {
+  userId: string;
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  inAppEnabled: boolean;
+  pushEnabled: boolean;
+  channelPreferences: Record<string, string[]>;
+  quietHours?: {
+    enabled: boolean;
+    start: string;
+    end: string;
+    timezone: string;
+  };
+  frequency?: 'immediate' | 'hourly_digest' | 'daily_digest';
+  updatedAt: string;
+}
+
+const NotificationPreferenceSchema = new Schema<INotificationPreferenceDocument>({
+  userId: { type: String, required: true, unique: true, index: true },
+  emailEnabled: { type: Boolean, default: true },
+  smsEnabled: { type: Boolean, default: true },
+  inAppEnabled: { type: Boolean, default: true },
+  pushEnabled: { type: Boolean, default: false },
+  channelPreferences: { type: Schema.Types.Mixed, default: {} },
+  quietHours: {
+    enabled: { type: Boolean, default: false },
+    start: { type: String, default: '22:00' },
+    end: { type: String, default: '08:00' },
+    timezone: { type: String, default: 'Asia/Kolkata' }
+  },
+  frequency: { type: String, enum: ['immediate', 'hourly_digest', 'daily_digest'], default: 'immediate' },
+  updatedAt: { type: String, required: true }
+});
+
+export const NotificationPreferenceModel = mongoose.models.NotificationPreference || mongoose.model<INotificationPreferenceDocument>('NotificationPreference', NotificationPreferenceSchema);
+
+// --- Notification Template ---
+export interface INotificationTemplateDocument extends Document {
+  id: string;
+  eventType: string;
+  name: string;
+  description: string;
+  channels: string[];
+  subject: string;
+  emailTemplate: string;
+  smsTemplate: string;
+  inAppTemplate: string;
+  priority: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const NotificationTemplateSchema = new Schema<INotificationTemplateDocument>({
+  id: { type: String, required: true, unique: true, index: true },
+  eventType: { type: String, required: true, index: true },
+  name: { type: String, required: true },
+  description: { type: String },
+  channels: [{ type: String }],
+  subject: { type: String, required: true },
+  emailTemplate: { type: String, required: true },
+  smsTemplate: { type: String, required: true },
+  inAppTemplate: { type: String, required: true },
+  priority: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+});
+
+export const NotificationTemplateModel = mongoose.models.NotificationTemplate || mongoose.model<INotificationTemplateDocument>('NotificationTemplate', NotificationTemplateSchema);
+
 // --- Feedback ---
 export interface IFeedbackDocument extends Document {
   id: string;

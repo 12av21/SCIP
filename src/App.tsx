@@ -36,6 +36,8 @@ const AdminPanelLazy = React.lazy(() => import('./components/views/AdminPanelVie
 import { FieldOfficerDashboard } from './components/views/FieldOfficerDashboard';
 import { DeptOfficerDashboard } from './components/views/DeptOfficerDashboard';
 import { DataAnalystDashboard } from './components/views/DataAnalystDashboard';
+import { AuthorityDashboard } from './components/views/AuthorityDashboard';
+import { ReportingCenter } from './components/views/ReportingCenter';
 import { ReportDetailModal } from './components/views/ReportDetailModal';
 import { AuthModal } from './components/views/AuthModal';
 import { AccountLinkingModal } from './components/views/AccountLinkingModal';
@@ -104,12 +106,14 @@ function SCIPMainLayout() {
       case 'dept-officer-dashboard': return t('nav.dept_desk', 'Department Operations Desk');
       case 'analyst-dashboard': return t('nav.analytics_models', 'Analytics & Models');
       case 'intel-dashboard': return t('nav.command_center', 'Operations / Intelligence Command');
+      case 'authority-dashboard': return t('nav.command_center', 'Authority Strategic Dashboard');
       case 'incidents': return t('nav.incident_queue', 'Operations / Incident Queue');
       case 'investigation': return language === 'HI' ? 'फॉरेंसिक अन्वेषण' : 'Forensic Investigation';
       case 'map': return t('nav.geospatial_map', 'Geospatial Intelligence Map');
       case 'geo-analytics': return t('nav.geo_analytics', 'Geographic Analytics');
       case 'trends': return t('nav.trends_recurrence', 'Trends & Recurrence');
       case 'agent': return t('nav.scip_agent', 'Decision Support Agent');
+      case 'reporting': return 'Reporting Center';
       case 'admin-panel': return t('nav.admin_governance', 'Administration');
       default: return language === 'HI' ? 'सरकारी पोर्टल' : 'Portal';
     }
@@ -310,10 +314,18 @@ function SCIPMainLayout() {
           <DataAnalystDashboard />
         )}
 
+        {currentTab === 'authority-dashboard' && (
+          <AuthorityDashboard />
+        )}
+
         {currentTab === 'agent' && (
           <Suspense fallback={null}>
             <AgentConsoleLazy />
           </Suspense>
+        )}
+
+        {currentTab === 'reporting' && (
+          <ReportingCenter />
         )}
 
         {currentTab === 'admin-panel' && (

@@ -5,7 +5,7 @@
  */
 import { SCIPDatabase } from './scipDatabase.js';
 import type { IScipRepository } from './repository.js';
-import type { User, UserRole, Report, Incident, AuditLog, Notification, Feedback, InspectionRecord, SpatioTemporalCluster, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel, ClerkIdentityLink, ClerkLinkVerificationMethod } from '../types/scip.js';
+import type { User, UserRole, Report, Incident, AuditLog, Notification, Feedback, InspectionRecord, SpatioTemporalCluster, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel, ClerkIdentityLink, ClerkLinkVerificationMethod, NotificationTemplate, NotificationPreference, NotificationEventType, NotificationChannel, NotificationPriority, NotificationFilters, NotificationStats } from '../types/scip.js';
 
 export class JsonScipRepository implements IScipRepository {
   readonly engine: SCIPDatabase;
@@ -28,6 +28,8 @@ export class JsonScipRepository implements IScipRepository {
   getUserById(id: string) { return this.engine.getUserById(id); }
   getUserByEmailWithPassword(email: string) { return this.engine.getUserByEmailWithPassword(email); }
   getUserByClerkId(clerkUserId: string) { return this.engine.getUserByClerkId(clerkUserId); }
+  findUsersByDepartment(departmentId: string) { return this.engine.findUsersByDepartment(departmentId); }
+  findUsersByRole(role: UserRole) { return this.engine.findUsersByRole(role); }
   // --- Clerk Identity Linking (Phase 3.1.3) ---
   linkClerkIdentity(scipUserId: string, clerkSubject: string) { return this.engine.linkClerkIdentity(scipUserId, clerkSubject); }
   createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }) { return this.engine.createClerkLinkRequest(input); }
@@ -67,11 +69,30 @@ export class JsonScipRepository implements IScipRepository {
   createIncidentFromCluster(cluster: SpatioTemporalCluster, creatorUser: User) { return this.engine.createIncidentFromCluster(cluster, creatorUser); }
   reviewIncident(incidentId: string, action: 'confirm' | 'dismiss', reviewer: User, notes?: string, deptId?: string, officerId?: string) { return this.engine.reviewIncident(incidentId, action, reviewer, notes ?? '', deptId, officerId); }
   resolveIncident(incidentId: string, resolver: User, payload: { actionTaken: string; preventiveMeasures?: string; costEstimate?: number }) { return this.engine.resolveIncident(incidentId, resolver, payload); }
+  closeIncident(incidentId: string, closer: User, notes?: string) { return this.engine.closeIncident(incidentId, closer, notes); }
+  reopenIncident(incidentId: string, reopener: User, reason: string) { return this.engine.reopenIncident(incidentId, reopener, reason); }
+  verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string) { return this.engine.verifyResolution(incidentId, citizenId, verified, comments); }
 
   getNotificationsForUser(userId: string) { return this.engine.getNotificationsForUser(userId); }
   createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>) { return this.engine.createNotification(data); }
   markNotificationAsRead(notifId: string, userId: string) { return this.engine.markNotificationAsRead(notifId, userId); }
   markAllNotificationsAsRead(userId: string) { return this.engine.markAllNotificationsAsRead(userId); }
+  // Enhanced notification methods
+  findNotificationById(id: string) { return this.engine.findNotificationById(id); }
+  updateNotification(id: string, notification: Notification) { return this.engine.updateNotification(id, notification); }
+  deleteNotification(id: string) { return this.engine.deleteNotification(id); }
+  findNotificationsByUser(userId: string, filters?: NotificationFilters) { return this.engine.findNotificationsByUser(userId, filters); }
+  getNotificationStats(userId: string) { return this.engine.getNotificationStats(userId); }
+  // Notification preferences
+  findNotificationPreferencesByUserId(userId: string) { return this.engine.findNotificationPreferencesByUserId(userId); }
+  upsertNotificationPreferences(prefs: NotificationPreference) { return this.engine.upsertNotificationPreferences(prefs); }
+  // Notification templates
+  findAllNotificationTemplates() { return this.engine.findAllNotificationTemplates(); }
+  findNotificationTemplateById(id: string) { return this.engine.findNotificationTemplateById(id); }
+  findNotificationTemplateByEventType(eventType: NotificationEventType) { return this.engine.findNotificationTemplateByEventType(eventType); }
+  createNotificationTemplate(template: NotificationTemplate) { return this.engine.createNotificationTemplate(template); }
+  updateNotificationTemplate(id: string, template: NotificationTemplate) { return this.engine.updateNotificationTemplate(id, template); }
+  deleteNotificationTemplate(id: string) { return this.engine.deleteNotificationTemplate(id); }
   submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>) { return this.engine.submitFeedback(data); }
   getFeedbacks() { return this.engine.getFeedbacks(); }
 

@@ -9,7 +9,8 @@ import type {
   Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics,
   AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality,
   AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel,
-  ClerkIdentityLink, ClerkLinkVerificationMethod
+  ClerkIdentityLink, ClerkLinkVerificationMethod,
+  NotificationTemplate, NotificationPreference, NotificationEventType, NotificationChannel, NotificationPriority, NotificationFilters, NotificationStats
 } from '../types/scip.js';
 
 export interface IScipRepository {
@@ -29,6 +30,8 @@ export interface IScipRepository {
   getUserById(id: string): Promise<User | undefined> | User | undefined;
   getUserByEmailWithPassword(email: string): Promise<User | undefined> | User | undefined;
   getUserByClerkId(clerkUserId: string): Promise<User | undefined> | User | undefined;
+  findUsersByDepartment(departmentId: string): Promise<User[]> | User[];
+  findUsersByRole(role: UserRole): Promise<User[]> | User[];
   createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> | User;
   updateUserRole(userId: string, newRole: UserRole, adminUser: User): Promise<User> | User;
   updateUserStatus(userId: string, status: 'active' | 'suspended', adminUser: User): Promise<User> | User;
@@ -85,12 +88,31 @@ export interface IScipRepository {
   createIncidentFromCluster(cluster: SpatioTemporalCluster, creatorUser: User): Promise<Incident> | Incident;
   reviewIncident(incidentId: string, action: 'confirm' | 'dismiss', reviewer: User, notes?: string, deptId?: string, officerId?: string): Promise<Incident> | Incident;
   resolveIncident(incidentId: string, resolver: User, payload: { actionTaken: string; preventiveMeasures?: string; costEstimate?: number }): Promise<Incident> | Incident;
+  closeIncident(incidentId: string, closer: User, notes?: string): Promise<Incident> | Incident;
+  reopenIncident(incidentId: string, reopener: User, reason: string): Promise<Incident> | Incident;
+  verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string): Promise<Incident> | Incident;
 
   // notifications/feedback
   getNotificationsForUser(userId: string): Promise<Notification[]> | Notification[];
   createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>): Promise<Notification> | Notification;
   markNotificationAsRead(notifId: string, userId: string): Promise<void> | void;
   markAllNotificationsAsRead(userId: string): Promise<void> | void;
+  // Enhanced notification methods
+  findNotificationById(id: string): Promise<Notification | undefined> | Notification | undefined;
+  updateNotification(id: string, notification: Notification): Promise<Notification> | Notification;
+  deleteNotification(id: string): Promise<boolean> | boolean;
+  findNotificationsByUser(userId: string, filters?: NotificationFilters): Promise<Notification[]> | Notification[];
+  getNotificationStats(userId: string): Promise<NotificationStats> | NotificationStats;
+  // Notification preferences
+  findNotificationPreferencesByUserId(userId: string): Promise<NotificationPreference | undefined> | NotificationPreference | undefined;
+  upsertNotificationPreferences(prefs: NotificationPreference): Promise<NotificationPreference> | NotificationPreference;
+  // Notification templates
+  findAllNotificationTemplates(): Promise<NotificationTemplate[]> | NotificationTemplate[];
+  findNotificationTemplateById(id: string): Promise<NotificationTemplate | undefined> | NotificationTemplate | undefined;
+  findNotificationTemplateByEventType(eventType: NotificationEventType): Promise<NotificationTemplate | undefined> | NotificationTemplate | undefined;
+  createNotificationTemplate(template: NotificationTemplate): Promise<NotificationTemplate> | NotificationTemplate;
+  updateNotificationTemplate(id: string, template: NotificationTemplate): Promise<NotificationTemplate> | NotificationTemplate;
+  deleteNotificationTemplate(id: string): Promise<boolean> | boolean;
   submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> | Feedback;
   getFeedbacks(): Promise<Feedback[]> | Feedback[];
 

@@ -18,6 +18,9 @@ import imageRoutes from './routes/imageRoutes';
 import databaseRoutes from './routes/databaseRoutes';
 import indiaCivicRoutes from './routes/indiaCivicRoutes';
 import linkingRoutes from './routes/linkingRoutes';
+import datasetRoutes from './routes/datasetRoutes';
+import reportingRoutes from './routes/reportingRoutes';
+import notificationRoutes from './routes/notificationRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
 import { validateClerkConfigOnStartup } from './middleware/auth.js';
@@ -137,8 +140,11 @@ export async function createApp(options: CreateAppOptions = {}) {
   app.use('/api/geoanalytics', geoanalyticsRoutes);
   app.use('/api/map', mapRoutes);
   app.use('/api/image', imageRoutes);
-app.use('/api/india', indiaCivicRoutes);
 app.use('/api/database', databaseRoutes);
+app.use('/api/india', indiaCivicRoutes);
+app.use('/api/dataset', datasetRoutes);
+app.use('/api/reporting', reportingRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)

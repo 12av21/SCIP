@@ -165,9 +165,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                           key={notif.id}
                           onClick={() => {
                             api.markNotificationRead(notif.id);
-                            if (notif.link?.startsWith('INC')) {
+                            if (notif.relatedEntityType === 'incident' && notif.relatedEntityId?.startsWith('INC')) {
                               onNavigate('incidents');
-                            } else if (notif.link?.startsWith('REP')) {
+                            } else if (notif.relatedEntityType === 'report' && notif.relatedEntityId?.startsWith('REP')) {
                               onNavigate('my-reports');
                             }
                             setIsNotifOpen(false);

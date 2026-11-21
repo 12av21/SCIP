@@ -12,10 +12,10 @@ import crypto from 'crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import mongoose from 'mongoose';
-import { UserModel, ReportModel, IncidentModel, DepartmentModel, NotificationModel, FeedbackModel, AuditLogModel, InspectionModel, AIAnalysisModel, ResolutionModel, AssignmentModel, CounterModel, RiskScoreModel, AdminStateModel, AdminDistrictModel, AdminSubDistrictModel, AdminBlockModel, AdminLocalityModel, AdministrativeBoundaryModel, IPSecurityLogModel, ClerkIdentityLinkModel } from './models/index.js';
+import { UserModel, ReportModel, IncidentModel, DepartmentModel, NotificationModel, NotificationPreferenceModel, NotificationTemplateModel, FeedbackModel, AuditLogModel, InspectionModel, AIAnalysisModel, ResolutionModel, AssignmentModel, CounterModel, RiskScoreModel, AdminStateModel, AdminDistrictModel, AdminSubDistrictModel, AdminBlockModel, AdminLocalityModel, AdministrativeBoundaryModel, IPSecurityLogModel, ClerkIdentityLinkModel } from './models/index.js';
 import type { IScipRepository } from './repository.js';
 import { DuplicateClerkIdentityError } from './identityErrors.js';
-import type { User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster, Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics, Resolution, Assignment, ReportCategory, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel, ClerkIdentityLink, ClerkLinkVerificationMethod } from '../types/scip.js';
+import type { User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster, Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics, Resolution, Assignment, ReportCategory, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality, AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel, ClerkIdentityLink, ClerkLinkVerificationMethod, NotificationTemplate, NotificationPreference, NotificationEventType, NotificationChannel, NotificationPriority, NotificationFilters, NotificationStats } from '../types/scip.js';
 import { classifyReport, extractEntities, determineSeverity } from '../ai/classifier.js';
 import { globalVectorizer } from '../ai/tfidf.js';
 import { findSimilarAndDuplicateReports } from '../ai/duplicateDetector.js';
@@ -249,6 +249,17 @@ export class MongoScipRepository implements IScipRepository {
     const docs = await UserModel.find().lean();
     return docs.map(d => stripPassword(d)!).filter(Boolean) as User[];
   }
+
+  async findUsersByDepartment(departmentId: string): Promise<User[]> {
+    const docs = await UserModel.find({ departmentId }).lean();
+    return docs.map(d => stripPassword(d)!).filter(Boolean) as User[];
+  }
+
+  async findUsersByRole(role: UserRole): Promise<User[]> {
+    const docs = await UserModel.find({ role }).lean();
+    return docs.map(d => stripPassword(d)!).filter(Boolean) as User[];
+  }
+
   async getUserById(id: string): Promise<User | undefined> {
     const doc = await UserModel.findOne({ id }).lean();
     return stripPassword(doc);
@@ -669,10 +680,14 @@ export class MongoScipRepository implements IScipRepository {
 
       await this.createNotification({
         userId: report.citizenId,
+        eventType: 'report_submitted',
         title: 'Report Received & Analyzed',
         message: `Your report ${id} was logged. AI identified category as "${analysis.categoryPredicted}" (${(analysis.categoryConfidence * 100).toFixed(0)}% confidence).`,
-        type: 'report_status' as any,
-        link: id
+        channels: ['in_app'],
+        priority: 'medium',
+        data: { reportId: id, category: analysis.categoryPredicted },
+        relatedEntityId: id,
+        relatedEntityType: 'report'
       }, session);
 
       return { report: stripMongo<Report>(report) as Report, analysis };
@@ -787,10 +802,14 @@ export class MongoScipRepository implements IScipRepository {
       } as any, session);
       await this.createNotification({
         userId: report.citizenId,
+        eventType: 'report_status_changed',
         title: 'Report Withdrawn',
         message: `Your report ${id} has been marked as withdrawn/closed.`,
-        type: 'report_status' as any,
-        link: id
+        channels: ['in_app'],
+        priority: 'medium',
+        data: { reportId: id, newStatus: 'withdrawn' },
+        relatedEntityId: id,
+        relatedEntityType: 'report'
       }, session);
       return stripMongo<Report>(updated)!;
     });
@@ -948,9 +967,15 @@ export class MongoScipRepository implements IScipRepository {
       const r: any = await ReportModel.findOneAndUpdate({ id: rId }, { $set: { status: 'resolved' } }, { returnDocument: 'after', lean: true });
       if (r?.citizenId) {
         await this.createNotification({
-          userId: r.citizenId, title: 'Incident Resolved',
+          userId: r.citizenId,
+          eventType: 'report_resolved',
+          title: 'Incident Resolved',
           message: `The incident affecting your report ${r.id} has been resolved by municipal authorities. Resolution: "${payload.actionTaken}".`,
-          type: 'resolution' as any, link: r.id
+          channels: ['in_app', 'email', 'sms'],
+          priority: 'high',
+          data: { reportId: r.id, incidentId, resolution: payload.actionTaken },
+          relatedEntityId: r.id,
+          relatedEntityType: 'report'
         });
       }
     }
@@ -979,6 +1004,115 @@ export class MongoScipRepository implements IScipRepository {
   async markAllNotificationsAsRead(userId: string): Promise<void> {
     await NotificationModel.updateMany({ userId }, { $set: { read: true } });
   }
+
+  async findNotificationById(id: string): Promise<Notification | undefined> {
+    const doc = await NotificationModel.findOne({ id }).lean();
+    return (stripMongo<Notification>(doc) as Notification | undefined) || undefined;
+  }
+
+  async updateNotification(id: string, notification: Notification): Promise<Notification> {
+    await NotificationModel.updateOne({ id }, { $set: notification });
+    return notification;
+  }
+
+  async deleteNotification(id: string): Promise<boolean> {
+    const result = await NotificationModel.deleteOne({ id });
+    return result.deletedCount > 0;
+  }
+
+  async findNotificationsByUser(userId: string, filters?: NotificationFilters): Promise<Notification[]> {
+    const query: any = { userId };
+
+    if (filters) {
+      if (filters.eventType) query.eventType = filters.eventType;
+      if (filters.channels?.length) query.channels = { $in: filters.channels };
+      if (filters.priority) query.priority = filters.priority;
+      if (filters.read !== undefined) query.read = filters.read;
+      if (filters.dateFrom || filters.dateTo) {
+        query.createdAt = {};
+        if (filters.dateFrom) query.createdAt.$gte = filters.dateFrom;
+        if (filters.dateTo) query.createdAt.$lte = filters.dateTo;
+      }
+      if (filters.relatedEntityId) query.relatedEntityId = filters.relatedEntityId;
+      if (filters.relatedEntityType) query.relatedEntityType = filters.relatedEntityType;
+    }
+
+    const docs = await NotificationModel.find(query)
+      .sort({ createdAt: -1 })
+      .skip(filters?.offset || 0)
+      .limit(filters?.limit || 100)
+      .lean();
+
+    return docs.map(d => stripMongo<Notification>(d)!).filter(Boolean) as Notification[];
+  }
+
+  async getNotificationStats(userId: string): Promise<NotificationStats> {
+    const notifications = await NotificationModel.find({ userId }).lean();
+    const notifs = notifications.map(d => stripMongo<Notification>(d)!).filter(Boolean) as Notification[];
+
+    const stats: NotificationStats = {
+      total: notifs.length,
+      unread: notifs.filter(n => !n.read).length,
+      byType: {} as Record<NotificationEventType, number>,
+      byChannel: {} as Record<NotificationChannel, number>,
+      byPriority: {} as Record<NotificationPriority, number>
+    };
+
+    for (const n of notifs) {
+      stats.byType[n.eventType] = (stats.byType[n.eventType] || 0) + 1;
+      for (const c of n.channels) {
+        stats.byChannel[c] = (stats.byChannel[c] || 0) + 1;
+      }
+      stats.byPriority[n.priority] = (stats.byPriority[n.priority] || 0) + 1;
+    }
+
+    return stats;
+  }
+
+  async findNotificationPreferencesByUserId(userId: string): Promise<NotificationPreference | undefined> {
+    const doc = await NotificationPreferenceModel.findOne({ userId }).lean();
+    return (stripMongo<NotificationPreference>(doc) as NotificationPreference | undefined) || undefined;
+  }
+
+  async upsertNotificationPreferences(prefs: NotificationPreference): Promise<NotificationPreference> {
+    await NotificationPreferenceModel.findOneAndUpdate(
+      { userId: prefs.userId },
+      { $set: prefs },
+      { upsert: true, new: true }
+    );
+    return prefs;
+  }
+
+  async findAllNotificationTemplates(): Promise<NotificationTemplate[]> {
+    const docs = await NotificationTemplateModel.find().lean();
+    return docs.map(d => stripMongo<NotificationTemplate>(d)!).filter(Boolean) as NotificationTemplate[];
+  }
+
+  async findNotificationTemplateById(id: string): Promise<NotificationTemplate | undefined> {
+    const doc = await NotificationTemplateModel.findOne({ id }).lean();
+    return (stripMongo<NotificationTemplate>(doc) as NotificationTemplate | undefined) || undefined;
+  }
+
+  async findNotificationTemplateByEventType(eventType: NotificationEventType): Promise<NotificationTemplate | undefined> {
+    const doc = await NotificationTemplateModel.findOne({ eventType }).lean();
+    return (stripMongo<NotificationTemplate>(doc) as NotificationTemplate | undefined) || undefined;
+  }
+
+  async createNotificationTemplate(template: NotificationTemplate): Promise<NotificationTemplate> {
+    await NotificationTemplateModel.create(template);
+    return template;
+  }
+
+  async updateNotificationTemplate(id: string, template: NotificationTemplate): Promise<NotificationTemplate> {
+    await NotificationTemplateModel.updateOne({ id }, { $set: template });
+    return template;
+  }
+
+  async deleteNotificationTemplate(id: string): Promise<boolean> {
+    const result = await NotificationTemplateModel.deleteOne({ id });
+    return result.deletedCount > 0;
+  }
+
   async submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> {
     const fb: Feedback = { ...data, id: await feedbackId(), createdAt: nowIso() } as Feedback;
     await FeedbackModel.create(fb);
@@ -1040,10 +1174,14 @@ export class MongoScipRepository implements IScipRepository {
       for (const doff of targets as any[]) {
         await this.createNotification({
           userId: doff.id,
+          eventType: 'incident_updated',
           title: 'New Field Inspection Submitted',
           message: `Field officer ${officer.name} submitted inspection ${newRecord.id} for incident ${incident.id}. Requires verification.`,
-          type: 'incident_alert' as any,
-          link: incident.id
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId: incident.id, inspectionId: newRecord.id, officerId: officer.id, officerName: officer.name },
+          relatedEntityId: incident.id,
+          relatedEntityType: 'incident'
         }, session);
       }
 
@@ -1118,10 +1256,14 @@ export class MongoScipRepository implements IScipRepository {
 
       await this.createNotification({
         userId: officerId,
+        eventType: 'incident_assigned',
         title: 'New Incident Work Order Assigned',
         message: `You have been assigned as lead field investigator for incident ${incidentId} (${incident.title}).`,
-        type: 'assignment' as any,
-        link: incidentId
+        channels: ['in_app', 'email', 'sms'],
+        priority: 'high',
+        data: { incidentId, incidentTitle: incident.title, departmentId, departmentName: dept?.name || departmentId },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
       }, session);
 
       await this.logAudit({
@@ -1163,10 +1305,177 @@ export class MongoScipRepository implements IScipRepository {
       for (const auth of authorities as any[]) {
         await this.createNotification({
           userId: auth.id,
+          eventType: 'incident_escalated',
           title: 'CRITICAL ESCALATION: Incident P1 Priority',
           message: `Incident ${incidentId} escalated by ${user.name}: "${reason}"`,
-          type: 'incident_alert' as any,
-          link: incidentId
+          channels: ['in_app', 'email', 'sms'],
+          priority: 'critical',
+          data: { incidentId, reason, escalatedBy: user.name },
+          relatedEntityId: incidentId,
+          relatedEntityType: 'incident'
+        }, session);
+      }
+
+const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
+    });
+  }
+
+  async closeIncident(incidentId: string, closer: User, notes?: string): Promise<Incident> {
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error('Incident not found');
+      if (incident.status !== 'resolved') {
+        throw new Error('Only resolved incidents can be closed. Current status: ' + incident.status);
+      }
+      if (closer.role === 'dept_officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
+      if (closer.role === 'officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
+
+      const now = nowIso();
+      const patch = {
+        status: 'closed',
+        updatedAt: now,
+        resolutionNotes: notes ? (incident.resolutionNotes || '') + `\n[CLOSED by ${closer.name}]: ${notes}` : incident.resolutionNotes
+      };
+      await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
+
+      await this.logAudit({
+        action: 'INCIDENT_RESOLVED', module: 'incidents', recordId: incidentId,
+        userId: closer.id, userEmail: closer.email, userRole: closer.role, ipAddress: '127.0.0.1',
+        details: `Closed incident ${incidentId}${notes ? ': ' + notes : ''}`
+      } as any, session);
+
+      if (incident.assignedOfficerId) {
+        await this.createNotification({
+          userId: incident.assignedOfficerId,
+          eventType: 'incident_closed',
+          title: 'Incident Closed',
+          message: `Incident ${incidentId} has been officially closed.${notes ? ' Notes: ' + notes : ''}`,
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId, notes },
+          relatedEntityId: incidentId,
+          relatedEntityType: 'incident'
+        }, session);
+      }
+
+      const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
+    });
+  }
+
+  async reopenIncident(incidentId: string, reopener: User, reason: string): Promise<Incident> {
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error('Incident not found');
+      if (incident.status !== 'resolved' && incident.status !== 'closed') {
+        throw new Error('Only resolved or closed incidents can be reopened. Current status: ' + incident.status);
+      }
+      if (reopener.role === 'dept_officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
+      if (reopener.role === 'officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+        throw new Error('Department boundary violation.');
+      }
+      if (typeof reason !== 'string' || !reason.trim()) {
+        throw new Error('Reopening reason is required.');
+      }
+
+      const now = nowIso();
+      const patch = {
+        status: 'in_progress',
+        updatedAt: now,
+        resolvedAt: null,
+        resolutionNotes: (incident.resolutionNotes || '') + `\n[REOPENED by ${reopener.name} on ${now}]: ${reason.trim()}`
+      };
+      await IncidentModel.updateOne({ id: incidentId }, { $set: patch }, { session });
+
+      await this.logAudit({
+        action: 'INCIDENT_REVIEWED', module: 'incidents', recordId: incidentId,
+        userId: reopener.id, userEmail: reopener.email, userRole: reopener.role, ipAddress: '127.0.0.1',
+        details: `Reopened incident ${incidentId}. Reason: ${reason.trim()}`
+      } as any, session);
+
+      if (incident.assignedOfficerId) {
+        await this.createNotification({
+          userId: incident.assignedOfficerId,
+          eventType: 'incident_reopened',
+          title: 'Incident Reopened',
+          message: `Incident ${incidentId} has been reopened: "${reason.trim()}"`,
+          channels: ['in_app', 'email', 'sms'],
+          priority: 'high',
+          data: { incidentId, reason: reason.trim() },
+          relatedEntityId: incidentId,
+          relatedEntityType: 'incident'
+        }, session);
+      }
+
+      // Update linked reports and notify citizens
+      const linkedReports = (await ReportModel.find({ id: { $in: incident.reportIds } }).lean()) as any[];
+      for (const r of linkedReports) {
+        await ReportModel.updateOne({ id: r.id }, { $set: { status: 'under_review', updatedAt: now } }, { session });
+        await this.createNotification({
+          userId: r.citizenId,
+          eventType: 'incident_reopened',
+          title: 'Incident Reopened',
+          message: `The incident linked to your report ${r.id} has been reopened for further investigation.`,
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId, reportId: r.id },
+          relatedEntityId: r.id,
+          relatedEntityType: 'report'
+        }, session);
+      }
+
+      const updated = await IncidentModel.findOne({ id: incidentId }).lean();
+      return stripMongo<Incident>(updated)!;
+    });
+  }
+
+  async verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string): Promise<Incident> {
+    return withTransaction(async (session) => {
+      const incident: any = await IncidentModel.findOne({ id: incidentId }).lean();
+      if (!incident) throw new Error('Incident not found');
+      if (incident.status !== 'resolved' && incident.status !== 'closed') {
+        throw new Error('Resolution can only be verified for resolved or closed incidents.');
+      }
+
+      const report = (await Promise.all(
+        incident.reportIds.map((rId: string) => ReportModel.findOne({ id: rId }).lean())
+      ))
+        .find((r: any) => r?.citizenId === citizenId);
+      if (!report) throw new Error('Citizen not associated with this incident.');
+
+      const resolution = await ResolutionModel.findOne({ incidentId }).lean();
+      if (!resolution) throw new Error('No resolution record found for this incident.');
+
+      await ResolutionModel.updateOne(
+        { incidentId },
+        { $set: { citizenVerified: verified, actionTaken: comments ? resolution.actionTaken + `\n[Citizen Verification]: ${comments}` : resolution.actionTaken } },
+        { session }
+      );
+
+      await this.logAudit({
+        action: 'INCIDENT_RESOLVED', module: 'incidents', recordId: incidentId,
+        userId: citizenId, userEmail: report.citizenEmail, userRole: 'citizen', ipAddress: '127.0.0.1',
+        details: `Citizen ${verified ? 'verified' : 'disputed'} resolution for incident ${incidentId}${comments ? ': ' + comments : ''}`
+      } as any, session);
+
+      if (incident.assignedOfficerId) {
+        await this.createNotification({
+          userId: incident.assignedOfficerId,
+          eventType: 'incident_verified',
+          title: 'Resolution ' + (verified ? 'Verified' : 'Disputed') + ' by Citizen',
+          message: `Citizen ${verified ? 'confirmed' : 'disputed'} the resolution for incident ${incidentId}.${comments ? ' Comments: ' + comments : ''}`,
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId, verified, comments },
+          relatedEntityId: incidentId,
+          relatedEntityType: 'incident'
         }, session);
       }
 

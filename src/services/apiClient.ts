@@ -254,6 +254,30 @@ class APIClient {
     return res.data;
   }
 
+  public async closeIncident(id: string, notes?: string) {
+    const res = await this.request<{ success: boolean; data: Incident }>(`/api/incidents/${id}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ notes })
+    });
+    return res.data;
+  }
+
+  public async reopenIncident(id: string, reason: string) {
+    const res = await this.request<{ success: boolean; data: Incident }>(`/api/incidents/${id}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    });
+    return res.data;
+  }
+
+  public async verifyResolution(id: string, verified: boolean, comments?: string) {
+    const res = await this.request<{ success: boolean; data: Incident }>(`/api/incidents/${id}/verify-resolution`, {
+      method: 'POST',
+      body: JSON.stringify({ verified, comments })
+    });
+    return res.data;
+  }
+
   // Intelligence
   public async runAgentQuery(query: string, specificTool?: string) {
     const res = await this.request<{ success: boolean; data: AgentBriefing }>('/api/intelligence/agent', {
@@ -720,6 +744,92 @@ class APIClient {
     return res.data;
   }
 
+  // Dataset Pipeline
+  public async getDatasetEntries(params?: { category?: string; split?: string; source?: string; limit?: number; offset?: number }) {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.split) query.set('split', params.split);
+    if (params?.source) query.set('source', params.source);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>(`/api/dataset?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getDatasetStats() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/dataset/stats');
+    return res.data;
+  }
+
+  public async getDatasetVersions() {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/dataset/versions');
+    return res.data;
+  }
+
+  public async getDatasetVersion(version: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/dataset/versions/${encodeURIComponent(version)}`);
+    return res.data;
+  }
+
+  public async addDatasetEntry(entry: { title: string; description: string; category: string; urgency: string; locationName: string; latitude: number; longitude: number; source?: string; split?: string }) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/dataset', {
+      method: 'POST',
+      body: JSON.stringify(entry)
+    });
+    return res.data;
+  }
+
+  public async bulkAddDatasetEntries(entries: any[]) {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/dataset/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ entries })
+    });
+    return res.data;
+  }
+
+  public async updateDatasetEntry(id: string, updates: any) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/dataset/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    });
+    return res.data;
+  }
+
+  public async deleteDatasetEntry(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/dataset/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    return res;
+  }
+
+  public async createDatasetVersion(version: string, notes?: string) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/dataset/versions', {
+      method: 'POST',
+      body: JSON.stringify({ version, notes })
+    });
+    return res.data;
+  }
+
+  public async evaluateModelOnDataset(modelVersion: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/dataset/evaluate/${encodeURIComponent(modelVersion)}`);
+    return res.data;
+  }
+
+  public async generateSyntheticExamples(count: number, category?: string) {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/dataset/generate', {
+      method: 'POST',
+      body: JSON.stringify({ count, category })
+    });
+    return res.data;
+  }
+
+  public async exportDataset(format: 'json' | 'csv' = 'json') {
+    const res = await this.request<{ success: boolean; data: string }>(`/api/dataset/export?format=${format}`, {
+      method: 'GET'
+    });
+    return res.data;
+  }
+
   // --- Image Intelligence ---
 
   public async uploadImage(payload: {
@@ -767,6 +877,213 @@ class APIClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  // --- Automated Reporting Engine ---
+
+  public async getReportTemplates() {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/reporting/templates');
+    return res.data;
+  }
+
+  public async getReportTemplate(id: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/reporting/templates/${encodeURIComponent(id)}`);
+    return res.data;
+  }
+
+  public async createReportTemplate(template: { name: string; description: string; type: string; format: string; frequency: string; recipients: string[]; departmentId?: string; filters?: any; schedule: any; isActive?: boolean }) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/reporting/templates', {
+      method: 'POST',
+      body: JSON.stringify(template)
+    });
+    return res.data;
+  }
+
+  public async updateReportTemplate(id: string, updates: any) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/reporting/templates/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    });
+    return res.data;
+  }
+
+  public async deleteReportTemplate(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/reporting/templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    return res;
+  }
+
+  public async generateReport(templateId: string, options?: { format?: string; filters?: any }) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/reporting/generate', {
+      method: 'POST',
+      body: JSON.stringify({ templateId, ...options })
+    });
+    return res.data;
+  }
+
+  public async getGeneratedReports(templateId?: string, limit?: number, offset?: number) {
+    const query = new URLSearchParams();
+    if (templateId) query.set('templateId', templateId);
+    if (limit) query.set('limit', String(limit));
+    if (offset) query.set('offset', String(offset));
+    const res = await this.request<{ success: boolean; data: any[]; meta: any }>(`/api/reporting/generated?${query.toString()}`);
+    return res.data;
+  }
+
+  public async getGeneratedReport(id: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/reporting/generated/${encodeURIComponent(id)}`);
+    return res.data;
+  }
+
+  public async downloadGeneratedReport(id: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/reporting/generated/${encodeURIComponent(id)}/download`);
+    return res.data;
+  }
+
+  public async deleteGeneratedReport(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/reporting/generated/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    return res;
+  }
+
+  public async processScheduledReports() {
+    const res = await this.request<{ success: boolean }>('/api/reporting/process-scheduled', {
+      method: 'POST'
+    });
+    return res;
+  }
+
+  // Notifications
+  public async getNotifications(filters?: {
+    eventType?: string;
+    channels?: string[];
+    priority?: string;
+    read?: boolean;
+    dateFrom?: string;
+    dateTo?: string;
+    relatedEntityId?: string;
+    relatedEntityType?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          if (Array.isArray(value)) {
+            params.append(key, value.join(','));
+          } else {
+            params.append(key, String(value));
+          }
+        }
+      });
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await this.request<{ success: boolean; data: any[] }>(`/api/notifications${query}`);
+    return res;
+  }
+
+  public async getNotificationStats() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/notifications/stats');
+    return res;
+  }
+
+  public async getUnreadCount() {
+    const res = await this.request<{ success: boolean; data: { unread: number } }>('/api/notifications/unread-count');
+    return res;
+  }
+
+  public async getNotificationTemplates() {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/notifications/templates');
+    return res;
+  }
+
+  public async getNotificationTemplate(eventType: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/notifications/templates/${encodeURIComponent(eventType)}`);
+    return res;
+  }
+
+  public async createNotificationTemplate(template: any) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/notifications/templates', {
+      method: 'POST',
+      body: JSON.stringify(template)
+    });
+    return res;
+  }
+
+  public async updateNotificationTemplate(id: string, updates: any) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/notifications/templates/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    });
+    return res;
+  }
+
+  public async deleteNotificationTemplate(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/notifications/templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    return res;
+  }
+
+  public async getNotificationPreferences() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/notifications/preferences');
+    return res;
+  }
+
+  public async updateNotificationPreferences(preferences: any) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(preferences)
+    });
+    return res;
+  }
+
+  public async sendNotification(notification: any) {
+    const res = await this.request<{ success: boolean; data: any }>('/api/notifications/send', {
+      method: 'POST',
+      body: JSON.stringify(notification)
+    });
+    return res;
+  }
+
+  public async sendBulkNotifications(requests: any[]) {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/notifications/send-bulk', {
+      method: 'POST',
+      body: JSON.stringify({ requests })
+    });
+    return res;
+  }
+
+  public async triggerNotificationEvent(eventType: string, data: any) {
+    const res = await this.request<{ success: boolean }>('/api/notifications/trigger', {
+      method: 'POST',
+      body: JSON.stringify({ eventType, data })
+    });
+    return res;
+  }
+
+  public async markNotificationAsRead(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'PATCH'
+    });
+    return res;
+  }
+
+  public async markAllNotificationsAsRead() {
+    const res = await this.request<{ success: boolean; data: { count: number } }>('/api/notifications/read-all', {
+      method: 'POST'
+    });
+    return res;
+  }
+
+  public async deleteNotification(id: string) {
+    const res = await this.request<{ success: boolean }>(`/api/notifications/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    return res;
   }
 }
 
