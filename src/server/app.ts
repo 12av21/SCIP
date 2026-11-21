@@ -153,10 +153,13 @@ app.use('/api', miscRoutes);
     }
   });
 
-  const attachFrontend = options.attachFrontend !== false && process.env.NODE_ENV !== 'test';
+  // Allow serving the production-built frontend (dist/) in test mode for E2E tests
+  // when explicitly requested via SCIP_SERVE_DIST=1.
+  const serveDist = process.env.SCIP_SERVE_DIST === '1';
+  const attachFrontend = options.attachFrontend !== false && (process.env.NODE_ENV !== 'test' || serveDist);
   if (attachFrontend) {
-    // Development: Vite Middleware Mode; Production: Static dist
-    if (process.env.NODE_ENV === 'production') {
+    // Development: Vite Middleware Mode; Production: Static dist; Test+ServeDist: Static dist
+    if (process.env.NODE_ENV === 'production' || serveDist) {
       const distPath = path.resolve(rootDir, 'dist');
       app.use(express.static(distPath));
       app.get('*', (req, res) => {

@@ -431,7 +431,7 @@ const AdminLocalitySchema = new Schema<IAdminLocalityDocument>({
   districtId: { type: String, required: true, index: true },
   stateId: { type: String, required: true, index: true },
   type: { type: String, enum: ['village', 'town', 'urban_locality', 'city'], required: true },
-  pinCode: { type: String, index: true },
+  pinCode: { type: String },
   isActive: { type: Boolean, default: true, index: true },
   createdAt: { type: String, required: true },
   updatedAt: { type: String, required: true }

@@ -27,14 +27,20 @@ function selectDriver(): DatabaseDriverSelection {
 }
 
 const requestedDriver = selectDriver();
-const testDbPath = process.env.SCIP_TEST_DB_PATH;
+const testDbPath = process.env.SCIP_TEST_DB_PATH || process.env.SCIP_DB_PATH;
+// Allow forcing test database isolation via SCIP_FORCE_TEST_DB=1 regardless of NODE_ENV.
+// This enables E2E tests to run with NODE_ENV=test while serving the production-built frontend.
+const forceTestDb = process.env.SCIP_FORCE_TEST_DB === '1';
 let jsonRepository: JsonScipRepository;
-if (testDbPath && process.env.NODE_ENV === 'test') {
+if (testDbPath && (process.env.NODE_ENV === 'test' || forceTestDb)) {
   const resolved = path.resolve(process.cwd(), testDbPath);
   if (path.basename(resolved) === '.scip_database.json') {
     throw new Error('Refusing to use production database file in test mode.');
   }
   jsonRepository = new JsonScipRepository(resolved);
+} else if (process.env.NODE_ENV === 'test' || forceTestDb) {
+  // Test mode without explicit test DB path - fail closed to prevent accidental primary DB access
+  throw new Error('Test mode requires SCIP_TEST_DB_PATH or SCIP_DB_PATH to be set for database isolation.');
 } else {
   jsonRepository = new JsonScipRepository();
 }
@@ -55,9 +61,10 @@ function getIsolatedMongoDbNameFromUri(uri: string): string | null {
 
 function isIsolatedLocalMongoUri(uri: string): boolean {
   const lower = uri.toLowerCase();
-  if (lower.includes('mongodb.net') || lower.includes('mongodb+srv://')) return false;
-  if (!/^mongodb:\/\//.test(lower)) return false;
-  if (!(lower.includes('127.0.0.1') || lower.includes('localhost') || lower.includes('[::1]'))) return false;
+  const isAtlas = lower.includes('mongodb.net') || lower.includes('mongodb+srv://');
+  if (isAtlas && process.env.NODE_ENV !== 'development') return false;
+  if (!/^mongodb(\+srv)?:\/\//.test(lower)) return false;
+  if (!isAtlas && !(lower.includes('127.0.0.1') || lower.includes('localhost') || lower.includes('[::1]'))) return false;
   const dbName = getIsolatedMongoDbNameFromUri(uri);
   if (!dbName) return false;
   // Explicit isolated targets only: approved dev DB or ephemeral local parity-test DBs.
