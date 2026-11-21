@@ -47,6 +47,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/express": "^4.17.21",
+    "@types/google.maps": "^3.67.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
