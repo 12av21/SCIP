@@ -9,7 +9,13 @@ import {
   AuditLog,
   Notification,
   RiskScore,
-  InspectionRecord
+  InspectionRecord,
+  AdminState,
+  AdminDistrict,
+  AdminSubDistrict,
+  AdminBlock,
+  AdminLocality,
+  AdministrativeBoundary
 } from '../types/scip.js';
 
 export const SEED_DEPARTMENTS: Department[] = [
@@ -59,17 +65,27 @@ export const SEED_DEPARTMENTS: Department[] = [
   }
 ];
 
-// Pre-hashed bcrypt for 'AdminPass123!', 'DirectorPass123!', 'OfficerPass123!', 'CitizenPass123!'
-// $2a$10$w6D4T8fW... or stored hashes
+// SECURITY: Pre-hashed bcrypt credentials only. No plaintext passwords are stored
+// in source code. These accounts are development-only and are never created in
+// production: seedDatabase() throws when a persisted database already exists, and
+// the /api/database/seed endpoint requires ENABLE_DEV_SEED=true, non-production,
+// and admin authentication.
+//
+// Account passwords are set during initial provisioning and are not recoverable
+// from this file. To rotate a dev account password, use /api/auth/change-password
+// or delete the persisted DB and re-seed in a non-production environment.
 export const SEED_USERS: User[] = [
   {
     id: 'USR-ADMIN-01',
     name: 'Adarsh Verma',
     email: 'admin@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AdminPass123!
+    passwordHash: '$2b$10$JKkcrNBnUIU1WhPIpjWKw.7H9cEalFzo.vz/3RshMt6IOMa6SsXnu',
     role: 'admin',
     phone: '+91-98765-43210',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z'
   },
@@ -77,10 +93,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-AUTH-01',
     name: 'Dr. Rajesh Gupta',
     email: 'director@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DirectorPass123!
+    passwordHash: '$2b$10$ANn7CXYwn5m6LglB/dxehe5QpcXtuSjiJ1qCuigNxZ6GZeO4H7Zsa',
     role: 'authority',
     phone: '+91-98765-43211',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-05T09:30:00.000Z',
     updatedAt: '2026-01-05T09:30:00.000Z'
   },
@@ -88,12 +107,15 @@ export const SEED_USERS: User[] = [
     id: 'USR-DEPT-01',
     name: 'Er. Sunita Patel',
     email: 'dept.patel@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DeptPass123!
+    passwordHash: '$2b$10$rp3yDtPMZRM3Lw8ufEqRquc5EPMTDg66fcZJZpOiwTZ1SxBLxrJRu',
     role: 'dept_officer',
     departmentId: 'DEP-WTR',
     departmentName: 'Water & Sewerage Authority',
     phone: '+91-98765-43213',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:30:00.000Z',
     updatedAt: '2026-01-10T11:30:00.000Z'
   },
@@ -101,12 +123,15 @@ export const SEED_USERS: User[] = [
     id: 'USR-OFF-01',
     name: 'Vikram Sharma',
     email: 'officer.sharma@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // OfficerPass123!
+    passwordHash: '$2b$10$Cv36.sOU3AN6Zog3qcbzTuDvx8hqqEq7/C7hgiWJ8KtmN1OfvnPcm',
     role: 'officer',
     departmentId: 'DEP-ROADS',
     departmentName: 'Public Works & Roads Infrastructure',
     phone: '+91-98765-43212',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:00:00.000Z',
     updatedAt: '2026-01-10T11:00:00.000Z'
   },
@@ -114,10 +139,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-ANL-01',
     name: 'Dr. Kavita Rao',
     email: 'analyst.rao@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AnalystPass123!
+    passwordHash: '$2b$10$43Pv14ENeSDrOqwNXAprlenxx2tz3LDYZVYzxidT3ks5HZtiRJKMW',
     role: 'analyst',
     phone: '+91-98765-43230',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-12T10:00:00.000Z',
     updatedAt: '2026-01-12T10:00:00.000Z'
   },
@@ -125,10 +153,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-01',
     name: 'Priya Sharma',
     email: 'citizen.jane@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$MRhFQnX7aAgdHxNPLln4uu8xgc9CdjtAL/NXR6slmwTnylCFgJNYW',
     role: 'citizen',
     phone: '+91-98765-43220',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-01T14:15:00.000Z',
     updatedAt: '2026-02-01T14:15:00.000Z'
   },
@@ -136,10 +167,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-02',
     name: 'Rahul Mehta',
     email: 'citizen.rahul@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$t8Zz7t8VehFFqUeGMkgsge7pr/Cy9/qaH2ruyZ71G4exaGbo91hk2',
     role: 'citizen',
     phone: '+91-98765-43221',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-03T16:00:00.000Z',
     updatedAt: '2026-02-03T16:00:00.000Z'
   }
@@ -497,31 +531,49 @@ export const SEED_NOTIFICATIONS: Notification[] = [
   {
     id: 'NOTIF-01',
     userId: 'USR-CIT-01',
+    eventType: 'report_status_changed',
     title: 'Report Analyzed',
     message: 'Your report REP-2026-001 (Water accumulation) was analyzed by SCIP and linked to Potential Incident INC-2026-001.',
-    type: 'report_status',
+    channels: ['in_app'],
+    priority: 'medium',
     read: false,
-    link: 'REP-2026-001',
+    emailSent: false,
+    smsSent: false,
+    pushSent: false,
+    relatedEntityId: 'REP-2026-001',
+    relatedEntityType: 'report',
     createdAt: '2026-10-03T07:25:00.000Z'
   },
   {
     id: 'NOTIF-02',
     userId: 'USR-AUTH-01',
+    eventType: 'incident_created',
     title: 'New Potential Incident Detected',
     message: 'SCIP Intelligence Agent detected Potential Incident INC-2026-001 (Drainage Failure at Sector 4 Market) with 4 linked observations.',
-    type: 'incident_alert',
+    channels: ['in_app', 'email'],
+    priority: 'high',
     read: false,
-    link: 'INC-2026-001',
+    emailSent: false,
+    smsSent: false,
+    pushSent: false,
+    relatedEntityId: 'INC-2026-001',
+    relatedEntityType: 'incident',
     createdAt: '2026-10-03T08:45:00.000Z'
   },
   {
     id: 'NOTIF-03',
     userId: 'USR-OFF-01',
+    eventType: 'incident_assigned',
     title: 'Incident Assigned',
     message: 'You have been assigned to investigate and coordinate Incident INC-2026-002 on West Boulevard.',
-    type: 'assignment',
+    channels: ['in_app', 'email', 'sms'],
+    priority: 'high',
     read: true,
-    link: 'INC-2026-002',
+    emailSent: true,
+    smsSent: true,
+    pushSent: false,
+    relatedEntityId: 'INC-2026-002',
+    relatedEntityType: 'incident',
     createdAt: '2026-10-02T19:30:00.000Z'
   }
 ];
@@ -614,4 +666,124 @@ export const SEED_INSPECTIONS: InspectionRecord[] = [
     verifiedByOfficerName: 'Er. Sunita Patel',
     verifiedAt: '2026-10-03T10:00:00.000Z'
   }
+];
+
+// ============================================================================
+// India Administrative Location Hierarchy Seed Data
+// India → State/UT → District → Sub-district/Tehsil/Taluk → Block → Village/Town/Urban Locality
+// Codes use LGD-style identifiers where available. All 36 States/UTs included.
+// Districts are a representative sample; full district data must be imported via
+// the administrative data-import/synchronization process (not hardcoded here).
+// ============================================================================
+
+export const SEED_ADMIN_STATES: AdminState[] = [
+  { id: 'IN-ST-AP', code: 'AP', name: 'Andhra Pradesh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-AR', code: 'AR', name: 'Arunachal Pradesh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-AS', code: 'AS', name: 'Assam', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-BR', code: 'BR', name: 'Bihar', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-CT', code: 'CT', name: 'Chhattisgarh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-GA', code: 'GA', name: 'Goa', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-GJ', code: 'GJ', name: 'Gujarat', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-HR', code: 'HR', name: 'Haryana', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-HP', code: 'HP', name: 'Himachal Pradesh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-JH', code: 'JH', name: 'Jharkhand', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-KA', code: 'KA', name: 'Karnataka', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-KL', code: 'KL', name: 'Kerala', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-MP', code: 'MP', name: 'Madhya Pradesh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-MH', code: 'MH', name: 'Maharashtra', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-MN', code: 'MN', name: 'Manipur', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-ML', code: 'ML', name: 'Meghalaya', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-MZ', code: 'MZ', name: 'Mizoram', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-NL', code: 'NL', name: 'Nagaland', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-OR', code: 'OR', name: 'Odisha', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-PB', code: 'PB', name: 'Punjab', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-RJ', code: 'RJ', name: 'Rajasthan', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-SK', code: 'SK', name: 'Sikkim', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-TN', code: 'TN', name: 'Tamil Nadu', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-TG', code: 'TG', name: 'Telangana', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-TR', code: 'TR', name: 'Tripura', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-UP', code: 'UP', name: 'Uttar Pradesh', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-UK', code: 'UK', name: 'Uttarakhand', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-ST-WB', code: 'WB', name: 'West Bengal', type: 'state', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Union Territories
+  { id: 'IN-UT-AN', code: 'AN', name: 'Andaman and Nicobar Islands', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-CH', code: 'CH', name: 'Chandigarh', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-DN', code: 'DN', name: 'Dadra and Nagar Haveli and Daman and Diu', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-DL', code: 'DL', name: 'Delhi', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-LD', code: 'LD', name: 'Lakshadweep', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-PY', code: 'PY', name: 'Puducherry', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-JK', code: 'JK', name: 'Jammu and Kashmir', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-UT-LA', code: 'LA', name: 'Ladakh', type: 'union_territory', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
+];
+
+export const SEED_ADMIN_DISTRICTS: AdminDistrict[] = [
+  // Andhra Pradesh
+  { id: 'IN-DIST-AP-01', code: 'AP01', name: 'Visakhapatnam', stateId: 'IN-ST-AP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-DIST-AP-02', code: 'AP02', name: 'Vijayawada', stateId: 'IN-ST-AP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Delhi
+  { id: 'IN-DIST-DL-01', code: 'DL01', name: 'Central Delhi', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-DIST-DL-02', code: 'DL02', name: 'South Delhi', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-DIST-DL-03', code: 'DL03', name: 'North Delhi', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Maharashtra
+  { id: 'IN-DIST-MH-01', code: 'MH01', name: 'Mumbai City', stateId: 'IN-ST-MH', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-DIST-MH-02', code: 'MH02', name: 'Pune', stateId: 'IN-ST-MH', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Karnataka
+  { id: 'IN-DIST-KA-01', code: 'KA01', name: 'Bengaluru Urban', stateId: 'IN-ST-KA', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Tamil Nadu
+  { id: 'IN-DIST-TN-01', code: 'TN01', name: 'Chennai', stateId: 'IN-ST-TN', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // West Bengal
+  { id: 'IN-DIST-WB-01', code: 'WB01', name: 'Kolkata', stateId: 'IN-ST-WB', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Uttar Pradesh
+  { id: 'IN-DIST-UP-01', code: 'UP01', name: 'Lucknow', stateId: 'IN-ST-UP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Rajasthan
+  { id: 'IN-DIST-RJ-01', code: 'RJ01', name: 'Jaipur', stateId: 'IN-ST-RJ', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Gujarat
+  { id: 'IN-DIST-GJ-01', code: 'GJ01', name: 'Ahmedabad', stateId: 'IN-ST-GJ', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Telangana
+  { id: 'IN-DIST-TG-01', code: 'TG01', name: 'Hyderabad', stateId: 'IN-ST-TG', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Bihar
+  { id: 'IN-DIST-BR-01', code: 'BR01', name: 'Patna', stateId: 'IN-ST-BR', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Odisha
+  { id: 'IN-DIST-OR-01', code: 'OR01', name: 'Khordha', stateId: 'IN-ST-OR', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Punjab
+  { id: 'IN-DIST-PB-01', code: 'PB01', name: 'Ludhiana', stateId: 'IN-ST-PB', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Haryana
+  { id: 'IN-DIST-HR-01', code: 'HR01', name: 'Gurugram', stateId: 'IN-ST-HR', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Kerala
+  { id: 'IN-DIST-KL-01', code: 'KL01', name: 'Thiruvananthapuram', stateId: 'IN-ST-KL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  // Madhya Pradesh
+  { id: 'IN-DIST-MP-01', code: 'MP01', name: 'Bhopal', stateId: 'IN-ST-MP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
+];
+
+export const SEED_ADMIN_SUB_DISTRICTS: AdminSubDistrict[] = [
+  { id: 'IN-SD-DL-01', code: 'DL01-SD1', name: 'Connaught Place', districtId: 'IN-DIST-DL-01', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-SD-DL-02', code: 'DL01-SD2', name: 'Karol Bagh', districtId: 'IN-DIST-DL-01', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-SD-MH-01', code: 'MH01-SD1', name: 'Mumbai City Taluka', districtId: 'IN-DIST-MH-01', stateId: 'IN-ST-MH', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-SD-KA-01', code: 'KA01-SD1', name: 'Bengaluru North Taluka', districtId: 'IN-DIST-KA-01', stateId: 'IN-ST-KA', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-SD-UP-01', code: 'UP01-SD1', name: 'Lucknow Tehsil', districtId: 'IN-DIST-UP-01', stateId: 'IN-ST-UP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-SD-TN-01', code: 'TN01-SD1', name: 'Chennai Taluka', districtId: 'IN-DIST-TN-01', stateId: 'IN-ST-TN', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
+];
+
+export const SEED_ADMIN_BLOCKS: AdminBlock[] = [
+  { id: 'IN-BLK-DL-01', code: 'DL01-BLK1', name: 'Central Delhi Block 1', subDistrictId: 'IN-SD-DL-01', districtId: 'IN-DIST-DL-01', stateId: 'IN-UT-DL', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BLK-MH-01', code: 'MH01-BLK1', name: 'Mumbai Block 1', subDistrictId: 'IN-SD-MH-01', districtId: 'IN-DIST-MH-01', stateId: 'IN-ST-MH', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BLK-KA-01', code: 'KA01-BLK1', name: 'Bengaluru North Block 1', subDistrictId: 'IN-SD-KA-01', districtId: 'IN-DIST-KA-01', stateId: 'IN-ST-KA', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BLK-UP-01', code: 'UP01-BLK1', name: 'Lucknow Block 1', subDistrictId: 'IN-SD-UP-01', districtId: 'IN-DIST-UP-01', stateId: 'IN-ST-UP', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BLK-TN-01', code: 'TN01-BLK1', name: 'Chennai Block 1', subDistrictId: 'IN-SD-TN-01', districtId: 'IN-DIST-TN-01', stateId: 'IN-ST-TN', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
+];
+
+export const SEED_ADMIN_LOCALITIES: AdminLocality[] = [
+  { id: 'IN-LOC-DL-01', code: 'DL01-L1', name: 'Connaught Place', blockId: 'IN-BLK-DL-01', subDistrictId: 'IN-SD-DL-01', districtId: 'IN-DIST-DL-01', stateId: 'IN-UT-DL', type: 'urban_locality', pinCode: '110001', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-LOC-DL-02', code: 'DL01-L2', name: 'Karol Bagh', blockId: 'IN-BLK-DL-01', subDistrictId: 'IN-SD-DL-02', districtId: 'IN-DIST-DL-01', stateId: 'IN-UT-DL', type: 'urban_locality', pinCode: '110005', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-LOC-MH-01', code: 'MH01-L1', name: 'Fort Mumbai', blockId: 'IN-BLK-MH-01', subDistrictId: 'IN-SD-MH-01', districtId: 'IN-DIST-MH-01', stateId: 'IN-ST-MH', type: 'urban_locality', pinCode: '400001', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-LOC-KA-01', code: 'KA01-L1', name: 'Bengaluru North', blockId: 'IN-BLK-KA-01', subDistrictId: 'IN-SD-KA-01', districtId: 'IN-DIST-KA-01', stateId: 'IN-ST-KA', type: 'urban_locality', pinCode: '560001', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-LOC-UP-01', code: 'UP01-L1', name: 'Hazratganj', blockId: 'IN-BLK-UP-01', subDistrictId: 'IN-SD-UP-01', districtId: 'IN-DIST-UP-01', stateId: 'IN-ST-UP', type: 'urban_locality', pinCode: '226001', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-LOC-TN-01', code: 'TN01-L1', name: 'Chennai Central', blockId: 'IN-BLK-TN-01', subDistrictId: 'IN-SD-TN-01', districtId: 'IN-DIST-TN-01', stateId: 'IN-ST-TN', type: 'urban_locality', pinCode: '600001', isActive: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
+];
+
+export const SEED_ADMIN_BOUNDARIES: AdministrativeBoundary[] = [
+  { id: 'IN-BDY-ST-AP', level: 'state', parentId: null, geometry: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BDY-ST-DL', level: 'state', parentId: null, geometry: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BDY-DIST-DL-01', level: 'district', parentId: 'IN-UT-DL', geometry: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'IN-BDY-DIST-MH-01', level: 'district', parentId: 'IN-ST-MH', geometry: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
 ];

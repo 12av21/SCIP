@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/apiClient';
 import { Report, Incident } from '../../types/scip';
-import { GeospatialMap } from '../map/GeospatialMap';
+import { UnifiedMap } from '../map/UnifiedMap';
 import { ReportDetailModal } from './ReportDetailModal';
 import {
   MapPin,
@@ -72,7 +72,7 @@ export const GeospatialIntelligenceView: React.FC = () => {
 
       {/* Main Map */}
       <div className="rounded-lg overflow-hidden border border-[#DCE3EA] shadow-2xs bg-white">
-        <GeospatialMap
+        <UnifiedMap
           reports={reports}
           incidents={incidents}
           onSelectReport={rep => setSelectedReportId(rep.id)}

@@ -1,9 +1,12 @@
-// SCIP Citizen Portal - Submit Report with Real-Time AI Suggestion & Validation
+// SCIP Citizen Portal - Submit Report with Interactive Map & GPS Location
 // Indian Government Portal Aesthetic with verifiable records and official citizen cards
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/apiClient';
-import { Report, ReportCategory, UrgencyLevel, AIAnalysis } from '../../types/scip';
+import { Report, ReportCategory, UrgencyLevel, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality } from '../../types/scip';
 import { classifyReport, extractEntities, determineSeverity } from '../../ai/classifier';
+import { geolocationService, LocationResult } from '../../services/geolocation';
 import {
   FileText,
   MapPin,
@@ -16,7 +19,13 @@ import {
   Camera,
   Trash2,
   Building2,
-  Info
+  Info,
+  LocateIcon as MyLocation,
+  Crosshair,
+  Globe,
+  Home,
+  Wifi,
+  Satellite
 } from 'lucide-react';
 
 interface SubmitReportViewProps {
@@ -24,14 +33,9 @@ interface SubmitReportViewProps {
   onNavigateToMyReports?: () => void;
 }
 
-const PRESET_LOCATIONS = [
-  { name: 'Sector 4 Market Entrance', lat: 28.6142, lng: 77.2091 },
-  { name: 'Sector 4 Market Gate 2', lat: 28.6145, lng: 77.2094 },
-  { name: 'West Boulevard Transformer 14', lat: 28.6253, lng: 77.2184 },
-  { name: 'North Industrial Expressway Ramp B', lat: 28.6380, lng: 77.2300 },
-  { name: 'Central Plaza Food Street', lat: 28.6100, lng: 77.2050 },
-  { name: 'Riverfront Canal Footbridge', lat: 28.6180, lng: 77.2120 }
-];
+const PRESET_LOCATIONS: { name: string; lat: number; lng: number }[] = [];
+
+const DEFAULT_CENTER: [number, number] = [20.5937, 78.9629];
 
 export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   onReportCreated,
@@ -40,16 +44,139 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ReportCategory>('Water & Drainage');
-  const [locationName, setLocationName] = useState('Sector 4 Market Entrance');
-  const [latitude, setLatitude] = useState(28.6142);
-  const [longitude, setLongitude] = useState(77.2091);
+  const [locationName, setLocationName] = useState('');
+  const [latitude, setLatitude] = useState(DEFAULT_CENTER[0]);
+  const [longitude, setLongitude] = useState(DEFAULT_CENTER[1]);
   const [urgency, setUrgency] = useState<UrgencyLevel>('medium');
   const [images, setImages] = useState<string[]>([]);
 
-  const [aiSuggestion, setAiSuggestion] = useState<any>(null);
+  // Administrative hierarchy (India)
+  const [states, setStates] = useState<AdminState[]>([]);
+  const [districts, setDistricts] = useState<AdminDistrict[]>([]);
+  const [subDistricts, setSubDistricts] = useState<AdminSubDistrict[]>([]);
+  const [blocks, setBlocks] = useState<AdminBlock[]>([]);
+  const [localities, setLocalities] = useState<AdminLocality[]>([]);
+  const [selectedStateId, setSelectedStateId] = useState<string>('');
+  const [selectedDistrictId, setSelectedDistrictId] = useState<string>('');
+  const [selectedSubDistrictId, setSelectedSubDistrictId] = useState<string>('');
+  const [selectedBlockId, setSelectedBlockId] = useState<string>('');
+  const [selectedLocalityId, setSelectedLocalityId] = useState<string>('');
+  const [address, setAddress] = useState('');
+  const [landmark, setLandmark] = useState('');
+  const [pinCode, setPinCode] = useState('');
+  const [locationSource, setLocationSource] = useState<'gps' | 'manual_map' | 'geocoded' | 'preset' | 'ip'>('manual_map');
+
+const [aiSuggestion, setAiSuggestion] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedResult, setSubmittedResult] = useState<{ report: Report; analysis: AIAnalysis } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [mapReady, setMapReady] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+
+  const handleUseIPLocation = async () => {
+    setGpsLoading(true);
+    setErrorMessage('');
+    try {
+      const result = await geolocationService.getIPLocation();
+      const { latitude: lat, longitude: lng } = result.location;
+const accuracy = result.location.locationAccuracyMeters;
+
+      setLatitude(lat);
+      setLongitude(lng);
+      setLocationSource(result.location.locationSource as any);
+      setLocationName(geolocationService.formatLocation(result.location));
+      setLocationAccuracy(accuracy ?? null);
+      
+      // Set administrative hierarchy if available
+      if (result.location.stateId) setSelectedStateId(result.location.stateId);
+      if (result.location.districtId) setSelectedDistrictId(result.location.districtId);
+      if (result.location.subDistrictId) setSelectedSubDistrictId(result.location.subDistrictId);
+      if (result.location.blockId) setSelectedBlockId(result.location.blockId);
+      if (result.location.localityId) setSelectedLocalityId(result.location.localityId);
+      if (result.location.pinCode) setPinCode(result.location.pinCode);
+      if (result.location.address) setAddress(result.location.address);
+      if (result.location.landmark) setLandmark(result.location.landmark);
+
+      if (mapRef.current) {
+        mapRef.current.flyTo([lat, lng] as [number, number], 12);
+        if (markerRef.current) {
+          markerRef.current.setLatLng([lat, lng]);
+        }
+        if (circleRef.current) {
+          circleRef.current.setLatLng([lat, lng]).setRadius(accuracy || 5000);
+        }
+      }
+
+      if (result.fallbackUsed) {
+        setErrorMessage(`Using IP-based location: ${result.fallbackReason}`);
+        setTimeout(() => setErrorMessage(''), 5000);
+      }
+    } catch {
+      setErrorMessage('Unable to detect IP location. Please use GPS or manual map selection.');
+    } finally {
+      setGpsLoading(false);
+    }
+  };
+
+const mapRef = useRef<L.Map | null>(null);
+const markerRef = useRef<L.Marker | null>(null);
+const circleRef = useRef<L.Circle | null>(null);
+const containerRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+  if (!containerRef.current) return;
+  if (!mapRef.current) {
+    const map = L.map(containerRef.current, {
+      center: DEFAULT_CENTER,
+      zoom: 5,
+      zoomControl: false,
+      attributionControl: false
+    });
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd'
+    }).addTo(map);
+    L.control.attribution({ position: 'bottomright', prefix: 'SCIP GIS · Leaflet' }).addTo(map);
+
+    const marker = L.marker(DEFAULT_CENTER, {
+      draggable: true
+    }).addTo(map);
+    const accuracyCircle = L.circle(DEFAULT_CENTER, {
+      radius: 10,
+      color: '#1F5F91',
+      fillColor: '#1F5F91',
+      fillOpacity: 0.15,
+      weight: 1
+    }).addTo(map);
+
+    mapRef.current = map;
+    markerRef.current = marker;
+    circleRef.current = accuracyCircle;
+
+    marker.on('dragend', () => {
+      const pos = marker.getLatLng();
+      setLatitude(pos.lat);
+      setLongitude(pos.lng);
+      setLocationSource('manual_map');
+      setLocationName(`Map-selected location (${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)})`);
+      accuracyCircle.setLatLng(pos);
+    });
+
+    map.on('click', handleMapClick);
+    setMapReady(true);
+  }
+  return () => {
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+      circleRef.current = null;
+      setMapReady(false);
+    }
+  };
+}, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -84,7 +211,6 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
     setImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Live real-time AI classification preview as the user types description
   useEffect(() => {
     const text = `${title} ${description}`;
     if (text.trim().length > 10) {
@@ -112,6 +238,124 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
     setLocationName(preset.name);
     setLatitude(preset.lat);
     setLongitude(preset.lng);
+    setLocationSource('preset');
+      if (mapRef.current && markerRef.current) {
+        mapRef.current.flyTo([preset.lat, preset.lng] as [number, number], 15);
+      markerRef.current.setLatLng([preset.lat, preset.lng]);
+      circleRef.current?.setLatLng([preset.lat, preset.lng]);
+    }
+  };
+
+  const loadStates = async () => {
+    try {
+      const data = await api.getStates();
+      setStates(data);
+    } catch {
+      // Silent fallback; hierarchical fields remain optional
+    }
+  };
+
+  useEffect(() => {
+    loadStates();
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedStateId) { setDistricts([]); setSubDistricts([]); setBlocks([]); setLocalities([]); return; }
+      try { setDistricts(await api.getDistricts(selectedStateId)); } catch { setDistricts([]); }
+    };
+    load();
+  }, [selectedStateId]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedDistrictId) { setSubDistricts([]); setBlocks([]); setLocalities([]); return; }
+      try { setSubDistricts(await api.getSubDistricts(selectedDistrictId)); } catch { setSubDistricts([]); }
+    };
+    load();
+  }, [selectedDistrictId]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedSubDistrictId) { setBlocks([]); setLocalities([]); return; }
+      try { setBlocks(await api.getBlocks(selectedSubDistrictId)); } catch { setBlocks([]); }
+    };
+    load();
+  }, [selectedSubDistrictId]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedBlockId) { setLocalities([]); return; }
+      try { setLocalities(await api.getLocalities(selectedBlockId)); } catch { setLocalities([]); }
+    };
+    load();
+  }, [selectedBlockId]);
+
+  const handleUseGPS = async () => {
+    setGpsLoading(true);
+    setErrorMessage('');
+    try {
+      // Use smart location detection with GPS -> IP -> Default fallback
+      const result: LocationResult = await geolocationService.detectLocation({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+
+      const { latitude: lat, longitude: lng } = result.location;
+      const accuracy = result.location.locationAccuracyMeters;
+
+      setLatitude(lat);
+      setLongitude(lng);
+      setLocationSource(result.location.locationSource as any);
+      setLocationName(geolocationService.formatLocation(result.location));
+      setLocationAccuracy(accuracy ?? null);
+      
+      // Set administrative hierarchy if available
+      if (result.location.stateId) setSelectedStateId(result.location.stateId);
+      if (result.location.districtId) setSelectedDistrictId(result.location.districtId);
+      if (result.location.subDistrictId) setSelectedSubDistrictId(result.location.subDistrictId);
+      if (result.location.blockId) setSelectedBlockId(result.location.blockId);
+      if (result.location.localityId) setSelectedLocalityId(result.location.localityId);
+      if (result.location.pinCode) setPinCode(result.location.pinCode);
+      if (result.location.address) setAddress(result.location.address);
+      if (result.location.landmark) setLandmark(result.location.landmark);
+
+      if (mapRef.current) {
+        mapRef.current.flyTo([lat, lng] as [number, number], 16);
+        if (markerRef.current) {
+          markerRef.current.setLatLng([lat, lng]);
+        }
+        if (circleRef.current) {
+          circleRef.current.setLatLng([lat, lng]).setRadius(accuracy || 10);
+        }
+      }
+
+      // Show fallback info if used
+      if (result.fallbackUsed) {
+        setErrorMessage(`Using ${result.source.toUpperCase()} location: ${result.fallbackReason}`);
+        setTimeout(() => setErrorMessage(''), 5000);
+      }
+    } catch {
+      setErrorMessage('Unable to access your location. Please use the map or enter coordinates manually.');
+    } finally {
+      setGpsLoading(false);
+    }
+  };
+
+  const handleMapClick = (e: L.LeafletMouseEvent) => {
+    const { lat, lng } = e.latlng;
+    setLatitude(lat);
+    setLongitude(lng);
+    setLocationSource('manual_map');
+    setLocationName(`Map-selected location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+    setLocationAccuracy(null);
+    if (markerRef.current) {
+      markerRef.current.setLatLng([lat, lng]);
+    }
+    if (circleRef.current) {
+      circleRef.current.setLatLng([lat, lng]);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,6 +370,14 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
       setErrorMessage('Please provide more detail in the description (at least 10 characters).');
       return;
     }
+    if (pinCode.trim() && !/^[1-9][0-9]{5}$/.test(pinCode.trim())) {
+      setErrorMessage('Please enter a valid 6-digit Indian PIN code or leave it blank.');
+      return;
+    }
+    if (!locationName.trim()) {
+      setErrorMessage('Please select or enter a location for the report.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -137,7 +389,18 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
         latitude,
         longitude,
         urgency,
-        images
+        images,
+        stateId: selectedStateId || undefined,
+        districtId: selectedDistrictId || undefined,
+        subDistrictId: selectedSubDistrictId || undefined,
+        blockId: selectedBlockId || undefined,
+        localityId: selectedLocalityId || undefined,
+        address: address.trim() || undefined,
+        landmark: landmark.trim() || undefined,
+        pinCode: pinCode.trim() || undefined,
+        locationSource,
+        locationAccuracyMeters: locationAccuracy || undefined,
+        locationConfirmedAt: new Date().toISOString()
       });
 
       setSubmittedResult(res);
@@ -153,14 +416,44 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
     setTitle('');
     setDescription('');
     setCategory('Water & Drainage');
-    setLocationName('Sector 4 Market Entrance');
-    setLatitude(28.6142);
-    setLongitude(77.2091);
+    setLocationName('');
+    setLatitude(DEFAULT_CENTER[0]);
+    setLongitude(DEFAULT_CENTER[1]);
     setUrgency('medium');
     setImages([]);
+    setSelectedStateId('');
+    setSelectedDistrictId('');
+    setSelectedSubDistrictId('');
+    setSelectedBlockId('');
+    setSelectedLocalityId('');
+    setAddress('');
+    setLandmark('');
+    setPinCode('');
+    setLocationSource('manual_map');
     setSubmittedResult(null);
     setErrorMessage('');
+    if (mapRef.current && markerRef.current) {
+      mapRef.current.flyTo(DEFAULT_CENTER, 5);
+      markerRef.current.setLatLng(DEFAULT_CENTER);
+    }
   };
+
+  const adminField = (label: string, value: string, options: { id: string; name: string }[], onChange: (id: string) => void, disabled: boolean) => (
+    <div key={label}>
+      <label className="block text-[11px] font-bold text-[#153E63] mb-1">{label}</label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+      >
+        <option value="">Select {label}</option>
+        {options.map(o => (
+          <option key={o.id} value={o.id}>{o.name}</option>
+        ))}
+      </select>
+    </div>
+  );
 
   if (submittedResult) {
     const { report, analysis } = submittedResult;
@@ -183,7 +476,6 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
           </p>
         </div>
 
-        {/* AI Analysis Summary Card */}
         <div className="bg-white border border-[#DCE3EA] rounded-xl p-6 space-y-4 shadow-xs">
           <div className="flex items-center justify-between border-b border-[#DCE3EA] pb-3">
             <div className="flex items-center gap-2">
@@ -242,7 +534,6 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
           )}
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-3">
           <button
             onClick={onNavigateToMyReports}
@@ -262,8 +553,7 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-2 space-y-6 text-[#253443]">
-      {/* Title */}
+    <div className="max-w-5xl mx-auto py-2 space-y-6 text-[#253443]">
       <div className="border-b border-[#DCE3EA] pb-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase text-[#1F5F91]">
           <span className="w-2 h-2 rounded-full bg-[#E89B36]" />
@@ -285,140 +575,259 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5 bg-white border border-[#DCE3EA] rounded-xl p-6 sm:p-8 shadow-xs">
-        {/* Title Field */}
-        <div>
-          <label className="block text-xs font-bold text-[#153E63] mb-1">
-            Grievance / Observation Title <span className="text-[#B42318]">*</span>
-          </label>
-          <input
-            type="text"
-            required
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            placeholder="e.g. Severe water accumulation and blocked storm drain"
-            className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
-          />
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Form Fields */}
+          <div className="space-y-5 lg:col-span-2">
+            {/* Title Field */}
+            <div>
+              <label className="block text-xs font-bold text-[#153E63] mb-1">
+                Grievance / Observation Title <span className="text-[#B42318]">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="e.g. Severe water accumulation and blocked storm drain"
+                className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+              />
+            </div>
 
-        {/* Description Field */}
-        <div>
-          <label className="block text-xs font-bold text-[#153E63] mb-1">
-            Detailed Ground Observation Notes <span className="text-[#B42318]">*</span>
-          </label>
-          <textarea
-            required
-            rows={4}
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="Describe what you observed: severity of water/damage, landmarks, blocked culverts, traffic impact..."
-            className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden leading-relaxed transition-colors"
-          />
-        </div>
+            {/* Description Field */}
+            <div>
+              <label className="block text-xs font-bold text-[#153E63] mb-1">
+                Detailed Ground Observation Notes <span className="text-[#B42318]">*</span>
+              </label>
+              <textarea
+                required
+                rows={4}
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="Describe what you observed: severity of water/damage, landmarks, blocked culverts, traffic impact..."
+                className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden leading-relaxed transition-colors"
+              />
+            </div>
 
-        {/* Live AI Assistant Suggestion Callout */}
-        {aiSuggestion && (
-          <div className="p-4 bg-[#EAF2F8] border border-[#DCE3EA] rounded-lg text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 font-bold text-[#153E63]">
-                <Sparkles className="w-4 h-4 text-[#E89B36]" />
-                <span>AI Categorization Suggestion</span>
+            {/* Live AI Assistant Suggestion Callout */}
+            {aiSuggestion && (
+              <div className="p-4 bg-[#EAF2F8] border border-[#DCE3EA] rounded-lg text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-[#153E63]">
+                    <Sparkles className="w-4 h-4 text-[#E89B36]" />
+                    <span>AI Categorization Suggestion</span>
+                  </div>
+                  <span className="font-mono text-[11px] text-[#1F5F91] font-bold tabular-nums">
+                    {(aiSuggestion.confidence * 100).toFixed(0)}% Match
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[#253443]">
+                  <span>
+                    Based on your description, this best matches category: <strong className="text-[#153E63]">{aiSuggestion.predictedCategory}</strong>
+                  </span>
+                  {category !== aiSuggestion.predictedCategory && (
+                    <button
+                      type="button"
+                      onClick={handleApplyAiCategory}
+                      className="px-3 py-1 text-[11px] font-bold bg-[#1F5F91] hover:bg-[#153E63] text-white rounded transition-colors shadow-xs cursor-pointer"
+                    >
+                      Apply Suggested Category
+                    </button>
+                  )}
+                </div>
               </div>
-              <span className="font-mono text-[11px] text-[#1F5F91] font-bold tabular-nums">
-                {(aiSuggestion.confidence * 100).toFixed(0)}% Match
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[#253443]">
-              <span>
-                Based on your description, this best matches category: <strong className="text-[#153E63]">{aiSuggestion.predictedCategory}</strong>
-              </span>
-              {category !== aiSuggestion.predictedCategory && (
-                <button
-                  type="button"
-                  onClick={handleApplyAiCategory}
-                  className="px-3 py-1 text-[11px] font-bold bg-[#1F5F91] hover:bg-[#153E63] text-white rounded transition-colors shadow-xs cursor-pointer"
+            )}
+
+            {/* Category & Urgency Pickers */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-[#153E63] mb-1">
+                  Municipal Category
+                </label>
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value as ReportCategory)}
+                  className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
                 >
-                  Apply Suggested Category
-                </button>
-              )}
+                  <option value="Water & Drainage">Water & Drainage</option>
+                  <option value="Roads & Traffic">Roads & Traffic</option>
+                  <option value="Public Sanitation">Public Sanitation</option>
+                  <option value="Power & Lighting">Power & Lighting</option>
+                  <option value="Parks & Environment">Parks & Environment</option>
+                  <option value="Structural Safety">Structural Safety</option>
+                  <option value="Public Health">Public Health</option>
+                  <option value="Noise & Disturbance">Noise & Disturbance</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#153E63] mb-1">
+                  Perceived Urgency Level
+                </label>
+                <select
+                  value={urgency}
+                  onChange={e => setUrgency(e.target.value as UrgencyLevel)}
+                  className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+                >
+                  <option value="low">Low (Standard civic maintenance)</option>
+                  <option value="medium">Medium (Requires attention within 72h)</option>
+                  <option value="high">High (Disrupting traffic or transit)</option>
+                  <option value="critical">Critical (Immediate public danger - 24h SLA)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Administrative Location Hierarchy */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {adminField('State / UT', selectedStateId, states.map(s => ({ id: s.id, name: s.name })), setSelectedStateId, false)}
+              {adminField('District', selectedDistrictId, districts.map(d => ({ id: d.id, name: d.name })), setSelectedDistrictId, !selectedStateId)}
+              {adminField('Sub-District', selectedSubDistrictId, subDistricts.map(s => ({ id: s.id, name: s.name })), setSelectedSubDistrictId, !selectedDistrictId)}
+              {adminField('Block', selectedBlockId, blocks.map(b => ({ id: b.id, name: b.name })), setSelectedBlockId, !selectedSubDistrictId)}
+              {adminField('Locality', selectedLocalityId, localities.map(l => ({ id: l.id, name: l.name })), setSelectedLocalityId, !selectedBlockId)}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-[#153E63] mb-1">
+                  Address / Landmark Details
+                </label>
+                <input
+                  type="text"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                  placeholder="Street address, building name, etc."
+                  className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#153E63] mb-1">
+                  Landmark (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={landmark}
+                  onChange={e => setLandmark(e.target.value)}
+                  placeholder="Near temple, school, etc."
+                  className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#153E63] mb-1">
+                  Indian PIN Code
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={pinCode}
+                  onChange={e => setPinCode(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="110001"
+                  className="w-full px-3.5 py-2.5 text-xs font-mono tabular-nums text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
+                />
+              </div>
             </div>
           </div>
-        )}
 
-        {/* Category & Urgency Pickers */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-[#153E63] mb-1">
-              Municipal Category
-            </label>
-            <select
-              value={category}
-              onChange={e => setCategory(e.target.value as ReportCategory)}
-              className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
-            >
-              <option value="Water & Drainage">Water & Drainage</option>
-              <option value="Roads & Traffic">Roads & Traffic</option>
-              <option value="Public Sanitation">Public Sanitation</option>
-              <option value="Power & Lighting">Power & Lighting</option>
-              <option value="Parks & Environment">Parks & Environment</option>
-              <option value="Structural Safety">Structural Safety</option>
-              <option value="Public Health">Public Health</option>
-              <option value="Noise & Disturbance">Noise & Disturbance</option>
-            </select>
+            <div className="lg:col-span-1 space-y-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-[#153E63] flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5" />
+                  Location Selection
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseGPS}
+                    disabled={gpsLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold bg-[#EAF2F8] hover:bg-[#dbeafe] border border-[#DCE3EA] text-[#1F5F91] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {gpsLoading ? (
+                      <span className="flex items-center gap-1"><span className="animate-spin"></span> Detecting...</span>
+                    ) : (
+                      <>
+                        <MyLocation className="w-3 h-3" /> Use My Location (GPS)
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseIPLocation}
+                    disabled={gpsLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-[#F5F7FA] border border-[#DCE3EA] text-[#657586] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Detect location via IP address (less accurate)"
+                  >
+                    <Wifi className="w-3 h-3" /> Auto (IP)
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative flex-1 bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg overflow-hidden shadow-xs">
+                <div ref={containerRef} className="w-full h-64" />
+                <div className="absolute top-2 right-2 z-10 flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (mapRef.current) mapRef.current.flyTo(DEFAULT_CENTER, 5);
+                    }}
+                    className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm"
+                    title="Reset map view"
+                  >
+                    <Home className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseGPS}
+                    disabled={gpsLoading}
+                    className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm disabled:opacity-50"
+                    title="Center on detected location"
+                  >
+                    <Crosshair className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="text-[#657586] font-medium">Coordinates:</span>
+                <span className="font-mono text-[#1F5F91] font-bold">
+                  {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                </span>
+                <span className="px-1 text-[#DCE3EA]">|</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  locationSource === 'gps' ? 'bg-[#D1FAE5] text-[#065F46]' :
+                  locationSource === 'ip' ? 'bg-[#FEF3C7] text-[#92400E]' :
+                  locationSource === 'preset' ? 'bg-[#E0E7FF] text-[#3730A3]' :
+                  'bg-[#EAF2F8] text-[#1F5F91]'
+                }`}>
+                  {locationSource === 'gps' ? 'GPS' :
+                   locationSource === 'ip' ? 'IP-Based' :
+                   locationSource === 'preset' ? 'Preset' : 'Manual Map'}
+                </span>
+                {locationAccuracy && (
+                  <span className="text-[10px] text-[#657586] bg-white px-2 py-0.5 rounded border border-[#DCE3EA]">
+                    ±{Math.round(locationAccuracy)}m
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-[#153E63] mb-1">
-              Perceived Urgency Level
-            </label>
-            <select
-              value={urgency}
-              onChange={e => setUrgency(e.target.value as UrgencyLevel)}
-              className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
-            >
-              <option value="low">Low (Standard civic maintenance)</option>
-              <option value="medium">Medium (Requires attention within 72h)</option>
-              <option value="high">High (Disrupting traffic or transit)</option>
-              <option value="critical">Critical (Immediate public danger - 24h SLA)</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Location Name & Preset Selection */}
+        {/* Location Description */}
         <div>
-          <label className="block text-xs font-bold text-[#153E63] mb-1">
-            Civic Landmark / Location Description <span className="text-[#B42318]">*</span>
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-bold text-[#153E63] mb-0">
+              Civic Landmark / Location Description <span className="text-[#B42318]">*</span>
+            </label>
+            <span className="text-[10px] text-[#657586]">Tap map, use GPS, or enter a description</span>
+          </div>
           <input
             type="text"
             required
             value={locationName}
             onChange={e => setLocationName(e.target.value)}
+            placeholder="Describe the location (street, landmark, area)"
             className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
           />
-
-          {/* Quick Municipal Location Presets */}
-          <div className="mt-2.5 text-xs text-[#657586]">
-            <span className="text-[11px] font-semibold text-[#153E63]">Verified Civic Presets:</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {PRESET_LOCATIONS.map(p => (
-                <button
-                  type="button"
-                  key={p.name}
-                  onClick={() => handleLocationPreset(p)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors cursor-pointer ${
-                    locationName === p.name
-                      ? 'bg-[#1F5F91] border-[#1F5F91] text-white font-bold'
-                      : 'bg-[#F5F7FA] border-[#DCE3EA] text-[#253443] hover:bg-[#EAF2F8]'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {/* GPS Coordinates */}
+        {/* GPS Coordinates (read-only preview) */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] font-medium text-[#657586] mb-1">Latitude</label>
@@ -427,6 +836,7 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
               step="0.0001"
               value={latitude}
               onChange={e => setLatitude(parseFloat(e.target.value))}
+              readOnly
               className="w-full px-3.5 py-2 text-xs font-mono tabular-nums text-[#253443] bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg focus:bg-white focus:outline-hidden"
             />
           </div>
@@ -437,6 +847,7 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
               step="0.0001"
               value={longitude}
               onChange={e => setLongitude(parseFloat(e.target.value))}
+              readOnly
               className="w-full px-3.5 py-2 text-xs font-mono tabular-nums text-[#253443] bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg focus:bg-white focus:outline-hidden"
             />
           </div>

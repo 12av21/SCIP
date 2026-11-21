@@ -6,7 +6,6 @@ import { useLanguage } from '../../context/LanguageContext';
 import { api } from '../../services/apiClient';
 import { Notification, UserRole } from '../../types/scip';
 import {
-  Bell,
   Search,
   User as UserIcon,
   LogOut,
@@ -18,6 +17,7 @@ import {
   Building2,
   Sparkles
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
 interface GovernmentHeaderProps {
   currentTab: string;
@@ -32,32 +32,10 @@ export const GovernmentHeader: React.FC<GovernmentHeaderProps> = ({
   onOpenAuth,
   language
 }) => {
-  const { user, role, switchDemoRole, logout } = useAuth();
+  const { user, role, logout } = useAuth();
   const { t } = useLanguage();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-
-  useEffect(() => {
-    loadNotifications();
-    const interval = setInterval(loadNotifications, 12000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const loadNotifications = async () => {
-    try {
-      const res = await api.getNotifications();
-      if (res && res.data) {
-        setNotifications(res.data);
-      }
-    } catch {
-      // Ignore
-    }
-  };
-
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,7 +90,7 @@ export const GovernmentHeader: React.FC<GovernmentHeaderProps> = ({
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder={t('header.search_placeholder', 'Search services, report ID (REP-...), or department...')}
+              placeholder={t('header.search_placeholder', 'Search services or report reference (e.g. REP-...)')}
               className="w-full pl-9 pr-20 py-2 text-xs bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg text-[#253443] placeholder-[#657586] focus:bg-white focus:border-[#1F5F91] focus:outline-hidden transition-colors"
             />
             <button
@@ -124,129 +102,12 @@ export const GovernmentHeader: React.FC<GovernmentHeaderProps> = ({
           </form>
         </div>
 
-        {/* Right: Quick Role Persona Switcher, Notifications & Auth */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {user ? (
-            <>
-              {/* Role Persona Switcher */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#153E63] bg-[#EAF2F8] hover:bg-[#dbeafe] rounded-md border border-[#DCE3EA] transition-colors cursor-pointer"
-                  title="Switch Role Persona"
-                >
-                  <span className="text-[10px] text-[#657586] uppercase font-normal">Role:</span>
-                  <span className="uppercase text-[11px] font-bold text-[#1F5F91]">{role}</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-[#1F5F91]" />
-                </button>
-
-                {isRoleDropdownOpen && (
-                  <div className="absolute right-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-[#DCE3EA] py-1 z-50">
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-[#657586] uppercase tracking-wider border-b border-[#DCE3EA] flex items-center justify-between">
-                      <span>Government Roles (6)</span>
-                      <span className="text-[9px] text-[#1F5F91] font-semibold">RBAC Verified</span>
-                    </div>
-                    {([
-                      { role: 'citizen' as UserRole, label: 'Citizen', sub: 'Priya Sharma (Public)', target: 'citizen-dashboard' },
-                      { role: 'officer' as UserRole, label: 'Field Officer', sub: 'Er. Vikram Sharma (PWD)', target: 'field-officer-dashboard' },
-                      { role: 'dept_officer' as UserRole, label: 'Dept Desk Officer', sub: 'Er. Sunita Patel (Urban Dev)', target: 'dept-officer-dashboard' },
-                      { role: 'analyst' as UserRole, label: 'Data & AI Analyst', sub: 'Dr. Kavita Rao (Analytics)', target: 'analyst-dashboard' },
-                      { role: 'authority' as UserRole, label: 'Authority Director', sub: 'Dr. Rajesh Gupta (Directorate)', target: 'intel-dashboard' },
-                      { role: 'admin' as UserRole, label: 'Super Administrator', sub: 'Adarsh Verma (MCA Gov)', target: 'admin-panel' },
-                    ]).map(item => (
-                      <button
-                        key={item.role}
-                        onClick={() => {
-                          switchDemoRole(item.role);
-                          setIsRoleDropdownOpen(false);
-                          onNavigate(item.target);
-                        }}
-                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-[#EAF2F8] transition-colors cursor-pointer ${
-                          role === item.role ? 'font-bold text-[#1F5F91] bg-[#F5F7FA]' : 'text-[#253443]'
-                        }`}
-                      >
-                        <div>
-                          <div className="font-semibold">{item.label}</div>
-                          <div className="text-[10px] text-[#657586] font-normal">{item.sub}</div>
-                        </div>
-                        {role === item.role && <CheckCircle className="w-3.5 h-3.5 text-[#28834A] shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Notification Center */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsNotifOpen(!isNotifOpen)}
-                  className="relative p-2 text-[#253443] hover:text-[#153E63] rounded-md hover:bg-[#F5F7FA] border border-transparent hover:border-[#DCE3EA] transition-colors cursor-pointer"
-                  aria-label="Notifications"
-                >
-                  <Bell className="w-4 h-4" />
-                  {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-4 h-4 bg-[#B42318] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                      {unreadCount}
-                    </span>
-                  )}
-                </button>
-
-                {isNotifOpen && (
-                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-lg shadow-lg border border-[#DCE3EA] py-2 z-50">
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-[#DCE3EA]">
-                      <span className="text-xs font-bold text-[#153E63]">
-                        Official Notifications ({notifications.length})
-                      </span>
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={async () => {
-                            await api.markAllNotificationsRead();
-                            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-                          }}
-                          className="text-[11px] text-[#1F5F91] hover:underline font-semibold cursor-pointer"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                    </div>
-                    <div className="max-h-72 overflow-y-auto divide-y divide-[#F0F4F8]">
-                      {notifications.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-[#657586]">
-                          No notifications available.
-                        </div>
-                      ) : (
-                        notifications.map(notif => (
-                          <div
-                            key={notif.id}
-                            onClick={() => {
-                              api.markNotificationRead(notif.id);
-                              if (notif.link?.startsWith('INC')) {
-                                onNavigate('incidents');
-                              } else if (notif.link?.startsWith('REP')) {
-                                onNavigate('my-reports');
-                              }
-                              setIsNotifOpen(false);
-                            }}
-                            className={`p-3 text-xs hover:bg-[#F5F7FA] cursor-pointer transition-colors ${
-                              !notif.read ? 'bg-[#EAF2F8]/50' : ''
-                            }`}
-                          >
-                            <div className="font-semibold text-[#253443] flex items-center justify-between">
-                              <span>{notif.title}</span>
-                              <span className="text-[10px] text-[#657586] font-normal">
-                                {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                            <p className="text-[#657586] mt-1 text-[11px] leading-relaxed line-clamp-2">
-                              {notif.message}
-                            </p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+{/* Right: Quick Role Persona Switcher, Notifications & Auth */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {user ? (
+              <>
+                {/* Notification Center */}
+                <NotificationBell />
 
               {/* User Profile */}
               <div className="relative">

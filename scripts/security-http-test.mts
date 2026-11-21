@@ -1,20 +1,70 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
-import jwt from 'jsonwebtoken';
+import { register } from 'node:module';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-http-'));
-const tmpDb = path.join(tmpDir, 'scip_test_db.json');
-process.env.SCIP_DB_PATH = tmpDb;
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET = 'test-jwt-secret-for-isolated-http-verification-123456';
-process.env.DISABLE_RATE_LIMIT = 'true';
-process.env.DISABLE_HMR = 'true';
+// Redirect @clerk/backend to a test shim (this test process only).
+register('./test-support/clerk-test-loader.mjs', import.meta.url);
+
+const useMongo = process.env.SCIP_TEST_DRIVER === 'mongo';
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), useMongo ? 'scip-http-mongo-' : 'scip-http-'));
+let mongoTestDbName = '';
+let mongoUri = '';
+
+if (useMongo) {
+  mongoTestDbName = `scip_test_http_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  mongoUri = `mongodb://127.0.0.1:27017/${mongoTestDbName}`;
+  process.env.NODE_ENV = 'development'; // required by gated runtime (non-production)
+  process.env.DATABASE_DRIVER = 'mongo';
+  process.env.MONGODB_URI = mongoUri;
+  process.env.SCIP_MONGO_RUNTIME_INTEGRATED = 'true';
+  process.env.JWT_SECRET = 'test-jwt-secret-for-isolated-http-mongo-123456';
+  process.env.DISABLE_RATE_LIMIT = 'true';
+  process.env.DISABLE_HMR = 'true';
+  process.env.SCIP_DB_PATH = path.join(tmpDir, 'fallback-unused.json');
+} else {
+  const tmpDb = path.join(tmpDir, 'scip_test_db.json');
+  process.env.SCIP_DB_PATH = tmpDb;
+  process.env.NODE_ENV = 'test';
+  process.env.JWT_SECRET = 'test-jwt-secret-for-isolated-http-verification-123456';
+  process.env.DISABLE_RATE_LIMIT = 'true';
+  process.env.DISABLE_HMR = 'true';
+}
+
+async function seedMongoTestDb() {
+  if (!useMongo) return;
+  const mongoose = (await import('mongoose')).default;
+  const srcPath = path.resolve('.scip_database.json');
+  const src = JSON.parse(fs.readFileSync(srcPath, 'utf-8'));
+  const collMap: Record<string, string> = {
+    users: 'users', departments: 'departments', reports: 'reports', incidents: 'incidents',
+    analyses: 'aianalyses', assignments: 'assignments', resolutions: 'resolutions', inspections: 'inspections',
+    notifications: 'notifications', feedbacks: 'feedbacks', auditLogs: 'auditlogs', riskScores: 'riskscores'
+  };
+  const keyMap: Record<string, string> = {
+    users: 'id', departments: 'id', reports: 'id', incidents: 'id', analyses: 'reportId',
+    assignments: 'id', resolutions: 'id', inspections: 'id', notifications: 'id', feedbacks: 'id', auditLogs: 'id', riskScores: 'id'
+  };
+  await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+  const dbconn = mongoose.connection.db!;
+  for (const [k, colName] of Object.entries(collMap)) {
+    const arr = Array.isArray(src[k]) ? src[k] : [];
+    if (arr.length) await dbconn.collection(colName).insertMany(arr.map((x: any) => ({ ...x })));
+    try { await dbconn.collection(colName).createIndex({ [keyMap[k]]: 1 }, { unique: true, sparse: true }); } catch {}
+  }
+  await mongoose.disconnect();
+}
+
+await seedMongoTestDb();
 
 const { createApp } = await import('../src/server/app.js');
-const { db } = await import('../src/database/scipDatabase.js');
-const { getJwtSecret } = await import('../src/server/middleware/auth.js');
+const { db, getDatabaseRuntimeInfo } = await import('../src/database/index.js');
+
+// Link every seed user to a deterministic test Clerk identity in the temp DB.
+for (const u of await db.getUsers()) {
+  if (!(u as any).clerkUserId) { await db.linkClerkIdentity(u.id, `clerk:${u.id}`); }
+}
 
 let passed = 0; let failed = 0;
 const results: string[] = [];
@@ -24,7 +74,7 @@ function ok(name: string, cond: boolean, detail = '') {
 }
 
 function tokenFor(u: any) {
-  return jwt.sign({ id: u.id, email: u.email, role: u.role, sv: u.sessionVersion ?? 0 }, getJwtSecret(), { expiresIn: '1h' });
+  return u.clerkUserId ?? `clerk:${u.id}`;
 }
 
 async function req(port: number, method: string, p: string, body?: any, token?: string) {
@@ -37,17 +87,23 @@ async function req(port: number, method: string, p: string, body?: any, token?: 
   return { status: res.status, headers: res.headers, json, text };
 }
 
-const app = await createApp({ initMongo: false, attachFrontend: false });
+const app = await createApp({ initMongo: useMongo, attachFrontend: false });
 const server = http.createServer(app);
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
 const port = (server.address() as any).port;
 
 try {
-  const users = db.getUsers();
-  const admin = users.find((u: any) => u.role === 'admin')!;
+  if (useMongo) {
+    const info = getDatabaseRuntimeInfo();
+    ok('mongo runtime active on isolated test db', info.activeDriver === 'mongo' && info.mongoRepositoryIntegrated === true && info.fallbackReason == null, JSON.stringify(info));
+  }
+  const users = await db.getUsers();
+  const admin = users.find((u: any) => u.role === 'admin');
+  if (!admin) throw new Error('Test setup failed: no admin user in seed data');
   const authority = users.find((u: any) => u.role === 'authority') || admin;
   const analyst = users.find((u: any) => u.role === 'analyst') || admin;
-  const citizen = users.find((u: any) => u.role === 'citizen')!;
+  const citizen = users.find((u: any) => u.role === 'citizen');
+  if (!citizen) throw new Error('Test setup failed: no citizen user in seed data');
   const otherCitizen = users.find((u: any) => u.role === 'citizen' && u.id !== citizen.id) || null;
   const officer = users.find((u: any) => u.role === 'officer') || admin;
   const deptOfficer = users.find((u: any) => u.role === 'dept_officer') || admin;
@@ -85,7 +141,8 @@ try {
   ok('unauthenticated GET /api/intelligence/export-csv -> 401', (await req(port, 'GET', '/api/intelligence/export-csv')).status === 401);
   ok('unauthenticated POST /api/intelligence/agent -> 401', (await req(port, 'POST', '/api/intelligence/agent', { query: 'test' })).status === 401);
   ok('invalid token -> 401', (await req(port, 'GET', '/api/reports', undefined, 'not-a-token')).status === 401);
-  ok('citizen cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, citizenTok)).status === 403);
+  ok('unknown clerk identity -> 401', (await req(port, 'GET', '/api/reports', undefined, 'clerk:USR-DOES-NOT-EXIST')).status === 401);
+  ok('missing token on /api/auth/me -> 401', (await req(port, 'GET', '/api/auth/me')).status === 401);
   ok('analyst cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, analystTok)).status === 403);
   ok('officer cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, officerTok)).status === 403);
   ok('dept_officer cannot access admin users -> 403', (await req(port, 'GET', '/api/admin/users', undefined, deptTok)).status === 403);
@@ -95,14 +152,26 @@ try {
   ok('analyst cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, analystTok)).status === 403);
   ok('officer cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, officerTok)).status === 403);
   ok('dept_officer cannot access audit logs -> 403', (await req(port, 'GET', '/api/admin/audit-logs', undefined, deptTok)).status === 403);
-  ok('authority can access audit logs -> 200', (await req(port, 'GET', '/api/admin/audit-logs', undefined, authorityTok)).status === 200);
   const adminAudit = await req(port, 'GET', '/api/admin/audit-logs', undefined, adminTok);
   ok('admin can access audit logs -> 200', adminAudit.status === 200);
   if (adminAudit.status === 200 && Array.isArray(adminAudit.json?.data)) {
     ok('audit logs omit hash/prevHash/metadata internals', adminAudit.json.data.every((l: any) => !('hash' in l) && !('prevHash' in l) && !('metadata' in l)));
     if (adminAudit.json.data.length > 0) {
-      ok('audit logs retain governance fields', adminAudit.json.data.every((l: any) => l && typeof l.id === 'string' && typeof l.action === 'string' && typeof l.module === 'string'));
+      ok('audit logs retain governance fields', adminAudit.json.data.every((l: any) => l && typeof l.id === 'string' && typeof l.action === 'string' && typeof l.module === 'string' && typeof l.userEmail === 'string' && typeof l.details === 'string' && typeof l.ipAddress === 'string'));
+      ok('audit logs include structured detailCode (Option B)', adminAudit.json.data.every((l: any) => typeof l.detailCode === 'string' && l.detailCode.startsWith('AUDIT_')));
+      ok('audit logs mask ipAddress last segment (Option B)', adminAudit.json.data.every((l: any) => {
+        if (typeof l.ipAddress !== 'string') return false;
+        if (l.ipAddress === 'unknown' || l.ipAddress === 'redacted') return true;
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(l.ipAddress)) return l.ipAddress.endsWith('.0');
+        if (l.ipAddress.includes(':')) return l.ipAddress.endsWith(':0') || l.ipAddress.split(':').pop() === '0';
+        return true;
+      }));
     }
+  }
+  const authorityAudit = await req(port, 'GET', '/api/admin/audit-logs', undefined, authorityTok);
+  ok('authority can access audit logs -> 200', authorityAudit.status === 200);
+  if (authorityAudit.status === 200 && Array.isArray(authorityAudit.json?.data) && authorityAudit.json.data.length > 0) {
+    ok('authority audit logs include detailCode and masked ipAddress (Option B)', authorityAudit.json.data.every((l: any) => typeof l.detailCode === 'string' && typeof l.ipAddress === 'string'));
   }
   ok('admin can access audit verify -> 200', (await req(port, 'GET', '/api/admin/audit-verify', undefined, adminTok)).status === 200);
   ok('authority can access audit verify -> 200', (await req(port, 'GET', '/api/admin/audit-verify', undefined, authorityTok)).status === 200);
@@ -132,14 +201,9 @@ try {
 
   ok('unauthenticated /api/auth/me -> 401', (await req(port, 'GET', '/api/auth/me')).status === 401);
   ok('unauthenticated POST /api/auth/logout -> 401', (await req(port, 'POST', '/api/auth/logout')).status === 401);
-  ok('unauthenticated POST /api/auth/change-password -> 401', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'old', newPassword: 'newpassword123' })).status === 401);
+  ok('change-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'old', newPassword: 'newpassword123' })).status === 404);
   ok('unauthenticated PUT /api/auth/profile -> 401', (await req(port, 'PUT', '/api/auth/profile', { name: 'Name' })).status === 401);
-  ok('reset-password rejects missing email -> 400', (await req(port, 'POST', '/api/auth/reset-password', {})).status === 400);
-  ok('reset-password rejects invalid email type -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: 123 })).status === 400);
-  ok('reset-password rejects whitespace email -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: '   ' })).status === 400);
-  ok('reset-password rejects overly long email -> 400', (await req(port, 'POST', '/api/auth/reset-password', { email: 'a'.repeat(255) + '@x.com' })).status === 400);
-  const resetUnknown = await req(port, 'POST', '/api/auth/reset-password', { email: 'nobody-does-not-exist@example.invalid' });
-  ok('reset-password enumeration-safe for unknown email -> 200', resetUnknown.status === 200, String(resetUnknown.status));
+  ok('reset-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/reset-password', {})).status === 404);
   const meRes = await req(port, 'GET', '/api/auth/me', undefined, citizenTok);
   ok('authenticated /api/auth/me -> 200', meRes.status === 200);
   ok('/api/auth/me omits sensitive auth state', meRes.status === 200 && meRes.json?.data && !('passwordHash' in meRes.json.data) && !('sessionVersion' in meRes.json.data) && !('credentialsResetRequired' in meRes.json.data));
@@ -150,9 +214,7 @@ try {
   ok('profile update rejects empty payload -> 400', (await req(port, 'PUT', '/api/auth/profile', {}, citizenTok)).status === 400);
   ok('profile update rejects invalid name -> 400', (await req(port, 'PUT', '/api/auth/profile', { name: '' }, citizenTok)).status === 400);
   ok('profile update rejects invalid phone -> 400', (await req(port, 'PUT', '/api/auth/profile', { phone: 'x'.repeat(31) }, citizenTok)).status === 400);
-  ok('change-password rejects invalid payload -> 400', (await req(port, 'POST', '/api/auth/change-password', {}, citizenTok)).status === 400);
-  ok('change-password rejects short new password -> 400', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'wrong-old-password', newPassword: 'short' }, citizenTok)).status === 400);
-  ok('change-password rejects wrong old password -> 401', (await req(port, 'POST', '/api/auth/change-password', { oldPassword: 'definitely-wrong-old-password', newPassword: 'NewPassword123!' }, citizenTok)).status === 401);
+  ok('change-password endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/change-password', {}, citizenTok)).status === 404);
 
   const citizenReports = await req(port, 'GET', '/api/reports', undefined, citizenTok);
   ok('citizen can list own reports -> 200', citizenReports.status === 200);
@@ -162,7 +224,7 @@ try {
   const citizenIncidents = await req(port, 'GET', '/api/incidents', undefined, citizenTok);
   ok('citizen can list incidents -> 200', citizenIncidents.status === 200);
   if (citizenIncidents.status === 200 && Array.isArray(citizenIncidents.json?.data)) {
-    ok('citizen incident list scoped to linked reports', citizenIncidents.json.data.every((i: any) => Array.isArray(i.reportIds) && i.reportIds.some((rid: string) => db.getReportById(rid)?.citizenId === citizen.id)));
+    { let citizenIncScoped = true; for (const i of (citizenIncidents.json?.data || [])) { let owns = false; for (const rid of (i.reportIds || [])) { if ((await db.getReportById(rid))?.citizenId === citizen.id) owns = true; } if (!owns) citizenIncScoped = false; } ok('citizen incident list scoped to linked reports', citizenIncScoped); }
   }
   const officerIncidents = await req(port, 'GET', '/api/incidents', undefined, officerTok);
   ok('officer can list incidents -> 200', officerIncidents.status === 200);
@@ -180,17 +242,17 @@ try {
   const officerReports = await req(port, 'GET', '/api/reports', undefined, officerTok);
   ok('officer can list reports -> 200', officerReports.status === 200);
   if (officerReports.status === 200 && Array.isArray(officerReports.json?.data)) {
-    ok('officer report list only linked-to-department incidents', officerReports.json.data.every((r: any) => {
-      if (!r.incidentId) return false;
-      const inc = db.getIncidentById(r.incidentId);
-      return inc && inc.assignedDepartmentId === officer.departmentId;
-    }));
+    let officerRptScoped = true; for (const r of (officerReports.json?.data||[])) { if(!r.incidentId){officerRptScoped=false;break;} const inc = await db.getIncidentById(r.incidentId); if(!(inc && inc.assignedDepartmentId === officer.departmentId)){officerRptScoped=false;break;} } ok('officer report list only linked-to-department incidents', officerRptScoped);
+
+
+
+
   }
   ok('dept_officer can list reports -> 200', (await req(port, 'GET', '/api/reports', undefined, deptTok)).status === 200);
   ok('authority can list reports -> 200', (await req(port, 'GET', '/api/reports', undefined, authorityTok)).status === 200);
   ok('unknown report read -> 404', (await req(port, 'GET', '/api/reports/REP-NOPE', undefined, adminTok)).status === 404);
 
-  const anyReport = db.getReports()[0];
+  const anyReport = (await db.getReports())[0];
   if (anyReport) {
     ok('report reject rejects missing reason -> 400', (await req(port, 'POST', `/api/reports/${anyReport.id}/reject`, {}, adminTok)).status === 400);
     ok('report reject unknown report -> 404', (await req(port, 'POST', `/api/reports/REP-NOPE/reject`, { reason: 'invalid reason' }, adminTok)).status === 404);
@@ -198,7 +260,7 @@ try {
     ok('analyst cannot reject report -> 403', (await req(port, 'POST', `/api/reports/${anyReport.id}/reject`, { reason: 'not allowed' }, analystTok)).status === 403);
   }
   if (otherCitizen) {
-    const otherReport = db.getReports().find((r: any) => r.citizenId === otherCitizen.id);
+    const otherReport = (await db.getReports()).find((r: any) => r.citizenId === otherCitizen.id);
     if (otherReport) {
       ok('citizen cannot read other citizen report -> 403', (await req(port, 'GET', `/api/reports/${otherReport.id}`, undefined, citizenTok)).status === 403);
       ok('citizen cannot reanalyze other citizen report -> 403', (await req(port, 'POST', `/api/reports/${otherReport.id}/reanalyze`, {}, citizenTok)).status === 403);
@@ -221,9 +283,11 @@ try {
   ok('dept_officer cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, deptTok)).status === 403);
   ok('analyst cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, analystTok)).status === 403);
   ok('authority cannot create report -> 403', (await req(port, 'POST', '/api/reports', { title: 'Valid title', description: 'Valid description here', locationName: 'Loc', latitude: 1, longitude: 1, category: 'Water & Drainage', urgency: 'low' }, authorityTok)).status === 403);
-  ok('public registration rejects privileged role -> 403', (await req(port, 'POST', '/api/auth/register', { name: 'Eve', email: 'eve-test@example.com', password: 'StrongPass123!', role: 'admin' })).status === 403);
-  ok('registration validates input -> 400', (await req(port, 'POST', '/api/auth/register', { name: '', email: 'bad', password: 'short' })).status === 400);
-  ok('login rejects missing credentials -> 400', (await req(port, 'POST', '/api/auth/login', { email: '', password: '' })).status === 400);
+  ok('public registration endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/register', { name: 'Eve', email: 'eve-test@example.com', password: 'StrongPass123!', role: 'admin' })).status === 404);
+  ok('login endpoint removed (Clerk) -> 404', (await req(port, 'POST', '/api/auth/login', { email: '', password: '' })).status === 404);
+
+// Password login/registration/change-password are delegated to Clerk and no longer exist on the SCIP API.
+
   ok('citizen cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, citizenTok)).status === 403);
   ok('analyst cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, analystTok)).status === 403);
   ok('officer cannot resolve incident -> 403', (await req(port, 'POST', '/api/incidents/NOPE/resolve', { actionTaken: 'test action long' }, officerTok)).status === 403);
@@ -278,7 +342,7 @@ try {
   ok('officer cannot access dataset quality -> 403', (await req(port, 'GET', '/api/intelligence/dataset-quality', undefined, officerTok)).status === 403);
   ok('citizen cannot access dataset quality -> 403', (await req(port, 'GET', '/api/intelligence/dataset-quality', undefined, citizenTok)).status === 403);
 
-  const incidents = db.getIncidents();
+  const incidents = await db.getIncidents();
   const unassigned = incidents.find((i: any) => !i.assignedDepartmentId && i.status !== 'resolved' && i.status !== 'dismissed' && i.status !== 'closed');
   const resolved = incidents.find((i: any) => i.status === 'resolved');
   ok('unknown incident read -> 404', (await req(port, 'GET', '/api/incidents/INC-NOPE', undefined, adminTok)).status === 404);
@@ -295,8 +359,8 @@ try {
       ok('analyst incident linked reports omit citizen PII', linked.every((r: any) => r.citizenName === undefined && r.citizenEmail === undefined));
     }
     if (otherCitizen) {
-      const owns = unassigned.reportIds.some((rid: string) => db.getReportById(rid)?.citizenId === otherCitizen.id);
-      const notOwn = unassigned.reportIds.every((rid: string) => db.getReportById(rid)?.citizenId !== otherCitizen.id);
+      let owns = false; for (const rid of unassigned.reportIds) { if ((await db.getReportById(rid))?.citizenId === otherCitizen.id) owns = true; }
+      let notOwn = true; for (const rid of unassigned.reportIds) { if ((await db.getReportById(rid))?.citizenId === otherCitizen.id) notOwn = false; }
       if (owns) ok('linked citizen can access incident -> 200', (await req(port, 'GET', `/api/incidents/${unassigned.id}`, undefined, tokenFor(otherCitizen))).status === 200);
       if (notOwn) ok('unlinked citizen cannot access incident -> 403', (await req(port, 'GET', `/api/incidents/${unassigned.id}`, undefined, tokenFor(otherCitizen))).status === 403);
     }
@@ -330,8 +394,8 @@ try {
 
   // Additional Phase 4/5 negative validation & permission checks (isolated)
   if (otherCitizen) {
-    const otherReport = db.getReports().find((r: any) => r.citizenId === otherCitizen.id);
-    const ownReport = db.getReports().find((r: any) => r.citizenId === citizen.id);
+    const otherReport = (await db.getReports()).find((r: any) => r.citizenId === otherCitizen.id);
+    const ownReport = (await db.getReports()).find((r: any) => r.citizenId === citizen.id);
     if (otherReport) {
       ok('citizen cannot update other citizen report -> 403', (await req(port, 'PUT', `/api/reports/${otherReport.id}`, { title: 'Hacked title' }, citizenTok)).status === 403);
       const unscopedUpd = await req(port, 'PUT', `/api/reports/${otherReport.id}`, { status: 'under_review' }, officerTok);
@@ -354,9 +418,9 @@ try {
   ok('citizen cannot reanalyze report -> 403', (await req(port, 'POST', '/api/reports/REP-NOPE/reanalyze', {}, citizenTok)).status === 403);
   ok('officer cannot reanalyze report -> 403', (await req(port, 'POST', '/api/reports/REP-NOPE/reanalyze', {}, officerTok)).status === 403);
   ok('dept_officer cannot reanalyze report -> 403', (await req(port, 'POST', '/api/reports/REP-NOPE/reanalyze', {}, deptTok)).status === 403);
-  const closedReport = db.getReports().find((r: any) => r.status === 'closed' || r.status === 'resolved');
+  const closedReport = (await db.getReports()).find((r: any) => r.status === 'closed' || r.status === 'resolved');
   if (closedReport) {
-    const ownerTok = closedReport.citizenId === citizen.id ? citizenTok : tokenFor(db.getUserById(closedReport.citizenId));
+    const ownerTok = closedReport.citizenId === citizen.id ? citizenTok : tokenFor(await db.getUserById(closedReport.citizenId));
     ok('reject closed/resolved report -> 400', (await req(port, 'POST', `/api/reports/${closedReport.id}/reject`, { reason: 'already closed' }, adminTok)).status === 400);
     ok('citizen cannot withdraw closed/resolved report -> 400', (await req(port, 'DELETE', `/api/reports/${closedReport.id}`, undefined, ownerTok)).status === 400);
   }
@@ -366,6 +430,8 @@ try {
 
   // Incident review & inspection validation/permission checks
   const activeIncident = incidents.find((i: any) => !['resolved', 'dismissed', 'closed'].includes(i.status));
+  const deptUnscopedIncident = incidents.find((i: any) => !['resolved', 'dismissed', 'closed'].includes(i.status) && i.id !== activeIncident?.id && (!i.assignedDepartmentId || i.assignedDepartmentId !== deptOfficer.departmentId))
+    || (activeIncident && (!activeIncident.assignedDepartmentId || activeIncident.assignedDepartmentId !== deptOfficer.departmentId) ? activeIncident : null);
   if (activeIncident) {
     ok('admin can read active incident detail -> 200', (await req(port, 'GET', `/api/incidents/${activeIncident.id}`, undefined, adminTok)).status === 200);
     ok('authority can read active incident detail -> 200', (await req(port, 'GET', `/api/incidents/${activeIncident.id}`, undefined, authorityTok)).status === 200);
@@ -381,7 +447,7 @@ try {
     if (!activeIncident.assignedDepartmentId || activeIncident.assignedDepartmentId !== deptOfficer.departmentId) {
       ok('dept_officer cannot read out-of-scope active incident -> 403', (await req(port, 'GET', `/api/incidents/${activeIncident.id}`, undefined, deptTok)).status === 403);
     }
-    const citizenOwnsActive = activeIncident.reportIds.some((rid: string) => db.getReportById(rid)?.citizenId === citizen.id);
+    let citizenOwnsActive = false; for (const rid of activeIncident.reportIds) { if ((await db.getReportById(rid))?.citizenId === citizen.id) citizenOwnsActive = true; }
     if (!citizenOwnsActive) {
       ok('unlinked citizen cannot read active incident -> 403', (await req(port, 'GET', `/api/incidents/${activeIncident.id}`, undefined, citizenTok)).status === 403);
     }
@@ -393,7 +459,7 @@ try {
     ok('citizen cannot review incident -> 403', (await req(port, 'POST', `/api/incidents/${activeIncident.id}/review`, { action: 'confirm', notes: 'citizen attempt' }, citizenTok)).status === 403);
     ok('analyst cannot review incident -> 403', (await req(port, 'POST', `/api/incidents/${activeIncident.id}/review`, { action: 'confirm', notes: 'analyst attempt' }, analystTok)).status === 403);
     ok('officer cannot review incident -> 403', (await req(port, 'POST', `/api/incidents/${activeIncident.id}/review`, { action: 'confirm', notes: 'valid notes' }, officerTok)).status === 403);
-    ok('dept_officer cannot review unscoped incident -> 403/400', await (async()=>{const s=(await req(port,'POST',`/api/incidents/${activeIncident.id}/review`,{action:'confirm',notes:'valid notes'},deptTok)).status; return s===403||s===400;})());
+    if (deptUnscopedIncident) ok('dept_officer cannot review unscoped incident -> 403/400', await (async()=>{const s=(await req(port,'POST',`/api/incidents/${deptUnscopedIncident.id}/review`,{action:'confirm',notes:'valid notes'},deptTok)).status; return s===403||s===400;})());
 
     const inspBad1 = await req(port, 'POST', `/api/incidents/${activeIncident.id}/inspection`, { verifiedStatus: 'nope', observations: '' }, officerTok);
     ok('inspection create rejects invalid payload -> 400/403', inspBad1.status === 400 || inspBad1.status === 403, String(inspBad1.status));
@@ -419,7 +485,7 @@ try {
     ok('authority can list incident inspections -> 200', (await req(port, 'GET', `/api/incidents/${activeIncident.id}/inspections`, undefined, authorityTok)).status === 200);
     ok('analyst cannot list incident inspections (no inspection.read) -> 403', (await req(port, 'GET', `/api/incidents/${activeIncident.id}/inspections`, undefined, analystTok)).status === 403);
     ok('officer cannot list unscoped incident inspections -> 403', (await req(port, 'GET', `/api/incidents/${activeIncident.id}/inspections`, undefined, officerTok)).status === 403);
-    ok('dept_officer cannot list unscoped incident inspections -> 403', (await req(port, 'GET', `/api/incidents/${activeIncident.id}/inspections`, undefined, deptTok)).status === 403);
+    if (deptUnscopedIncident) ok('dept_officer cannot list unscoped incident inspections -> 403', (await req(port, 'GET', `/api/incidents/${deptUnscopedIncident.id}/inspections`, undefined, deptTok)).status === 403);
     ok('citizen cannot list unlinked incident inspections -> 403/404', await (async()=>{const s=(await req(port,'GET',`/api/incidents/${activeIncident.id}/inspections`,undefined,citizenTok)).status; return s===403||s===404;})());
   }
 
@@ -446,7 +512,7 @@ try {
     ok('incident escalate rejects long reason -> 400', (await req(port, 'POST', `/api/incidents/${activeIncident.id}/escalate`, { reason: 'x'.repeat(2001) }, adminTok)).status === 400);
     ok('incident escalate unknown incident -> 404', (await req(port, 'POST', '/api/incidents/INC-NOPE/escalate', { reason: 'valid escalation reason' }, adminTok)).status === 404);
     ok('officer cannot escalate incident -> 403', (await req(port, 'POST', `/api/incidents/${activeIncident.id}/escalate`, { reason: 'valid escalation reason' }, officerTok)).status === 403);
-    ok('dept_officer cannot escalate unscoped incident -> 403/400', await (async()=>{const s=(await req(port,'POST',`/api/incidents/${activeIncident.id}/escalate`,{reason:'valid escalation reason'},deptTok)).status; return s===403||s===400;})());
+    if (deptUnscopedIncident) ok('dept_officer cannot escalate unscoped incident -> 403/400', await (async()=>{const s=(await req(port,'POST',`/api/incidents/${deptUnscopedIncident.id}/escalate`,{reason:'valid escalation reason'},deptTok)).status; return s===403||s===400;})());
   }
 
   ok('unauthenticated notifications/read-all -> 401', (await req(port, 'POST', '/api/notifications/read-all')).status === 401);
@@ -461,38 +527,41 @@ try {
   ok('intelligence export default type reports -> 200', defaultExport.status === 200, String(defaultExport.status));
   const incidentsExport = await req(port, 'GET', '/api/intelligence/export-csv?type=incidents', undefined, adminTok);
   ok('intelligence export incidents type -> 200', incidentsExport.status === 200, String(incidentsExport.status));
-  const victim = otherCitizen || citizen;
-  const victimOldTok = tokenFor(victim);
-  (db as any).invalidateUserSessions(victim.id);
-  ok('revoked session token rejected -> 401', (await req(port, 'GET', '/api/reports', undefined, victimOldTok)).status === 401);
   const target = users.find((u: any) => u.role === 'officer') || admin;
   const targetTok = tokenFor(target);
-  db.updateUserStatus(target.id, 'suspended', admin);
+  await db.updateUserStatus(target.id, 'suspended', admin);
   ok('suspended account token rejected -> 403', (await req(port, 'GET', '/api/reports', undefined, targetTok)).status === 403);
-  db.updateUserStatus(target.id, 'active', admin);
-  const targetTok2 = tokenFor(db.getUserById(target.id));
-  db.markCredentialsResetRequired(target.id);
+  await db.updateUserStatus(target.id, 'active', admin);
+  const targetTok2 = tokenFor(await db.getUserById(target.id));
+  await db.markCredentialsResetRequired(target.id);
   const resetRes = await req(port, 'GET', '/api/reports', undefined, targetTok2);
   ok('token invalidated by credential reset flow rejected -> 401/403', resetRes.status === 401 || resetRes.status === 403, String(resetRes.status));
 
   const adminUsers = await req(port, 'GET', '/api/admin/users', undefined, adminTok);
-  ok('admin can list users -> 200', adminUsers.status === 200);
-  if (adminUsers.status === 200 && Array.isArray(adminUsers.json?.data)) {
+  ok('admin users list -> 200', adminUsers.status === 200);
+  if (adminUsers.status === 200 && Array.isArray(adminUsers.json?.data) && adminUsers.json.data.length > 0) {
     ok('admin users response omits passwordHash', adminUsers.json.data.every((u: any) => !('passwordHash' in u)));
-  ok('admin users response omits internal auth state', adminUsers.json.data.every((u: any) => !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('admin users response omits internal auth state', adminUsers.json.data.every((u: any) => !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('admin users retain contact fields for admin (Option B)', adminUsers.json.data.every((u: any) => typeof u.email === 'string'));
+  }
+  const authorityUsers = await req(port, 'GET', '/api/admin/users', undefined, authorityTok);
+  ok('authority users list -> 200', authorityUsers.status === 200);
+  if (authorityUsers.status === 200 && Array.isArray(authorityUsers.json?.data) && authorityUsers.json.data.length > 0) {
+    ok('authority users response omits passwordHash/internal auth state', authorityUsers.json.data.every((u: any) => !('passwordHash' in u) && !('sessionVersion' in u) && !('credentialsResetRequired' in u)));
+    ok('authority users receive reduced directory view (no email/phone, Option B)', authorityUsers.json.data.every((u: any) => !('email' in u) && !('phone' in u)));
   }
   ok('dept_officer cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, deptTok)).status === 403);
   ok('analyst cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, analystTok)).status === 403);
   ok('citizen cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, citizenTok)).status === 403);
   ok('admin can access admin departments -> 200', (await req(port, 'GET', '/api/admin/departments', undefined, adminTok)).status === 200);
   ok('authority cannot access admin departments -> 200', (await req(port, 'GET', '/api/admin/departments', undefined, authorityTok)).status === 200);
-  ok('officer cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, tokenFor(db.getUserById(officer.id)))).status === 403);
+  ok('officer cannot access admin departments -> 403', (await req(port, 'GET', '/api/admin/departments', undefined, tokenFor(await db.getUserById(officer.id)))).status === 403);
 
   const logoutUser = users.find((u: any) => u.role === 'analyst') || admin;
-  const logoutTok = tokenFor(db.getUserById(logoutUser.id));
+  const logoutTok = tokenFor(await db.getUserById(logoutUser.id));
   const logoutRes = await req(port, 'POST', '/api/auth/logout', {}, logoutTok);
   ok('logout succeeds -> 200', logoutRes.status === 200);
-  ok('token invalid after logout -> 401', (await req(port, 'GET', '/api/reports', undefined, logoutTok)).status === 401);
+  // Clerk tokens are stateless; server-side logout cannot revoke an already-issued token (short TTL + Clerk session revocation is the control).
 
   const health = await req(port, 'GET', '/api/health');
   ok('health endpoint -> 200', health.status === 200);
@@ -510,7 +579,21 @@ try {
   console.log(`SUMMARY: ${passed} passed, ${failed} failed`);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  try {
+    const { closeMongoConnection } = await import('../src/database/mongoConnection.js');
+    await closeMongoConnection().catch(() => {});
+  } catch {}
+  if (useMongo && mongoUri) {
+    try {
+      const mongoose = (await import('mongoose')).default;
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+      await mongoose.connection.dropDatabase();
+      await mongoose.disconnect();
+    } catch {}
+  }
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 }
 process.exit(failed ? 1 : 0);
+
+
 

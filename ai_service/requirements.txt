@@ -4,3 +4,5 @@ pydantic>=2.6.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
 python-multipart>=0.0.9
+# Optional: sentence-transformers for semantic embeddings (install with: pip install -r requirements.txt)
+sentence-transformers>=2.5.0

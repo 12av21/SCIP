@@ -1,6 +1,6 @@
 // Smart Community Intelligence Platform (SCIP) - Master Application Shell
 // Redesigned with Indian Government Digital Portal standard inspired by MyGov.in
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
@@ -11,6 +11,15 @@ import { GovernmentFooter } from './components/layout/GovernmentFooter';
 
 import { LandingPage } from './components/views/LandingPage';
 import { AboutPage } from './components/views/AboutPage';
+import { FeaturesPage } from './components/views/FeaturesPage';
+import { HowItWorksPage } from './components/views/HowItWorksPage';
+import { CommunityReportingPage } from './components/views/CommunityReportingPage';
+import { AiIntelligencePage } from './components/views/AiIntelligencePage';
+import { ContactPage } from './components/views/ContactPage';
+import { HelpSupportPage } from './components/views/HelpSupportPage';
+import { FaqPage } from './components/views/FaqPage';
+import { PrivacyPolicyPage } from './components/views/PrivacyPolicyPage';
+import { TermsPage } from './components/views/TermsPage';
 import { CitizenDashboard } from './components/views/CitizenDashboard';
 import { SubmitReportView } from './components/views/SubmitReportView';
 import { MyReportsView } from './components/views/MyReportsView';
@@ -20,17 +29,20 @@ import { IntelligenceDashboard } from './components/views/IntelligenceDashboard'
 import { IncidentManagementView } from './components/views/IncidentManagementView';
 import { ReportInvestigationView } from './components/views/ReportInvestigationView';
 import { GeospatialIntelligenceView } from './components/views/GeospatialIntelligenceView';
+import { GeoAnalyticsView } from './components/views/GeoAnalyticsView';
 import { TrendAnalysisView } from './components/views/TrendAnalysisView';
-import { AgentConsoleView } from './components/views/AgentConsoleView';
-import { AdminPanelView } from './components/views/AdminPanelView';
-import { TestRunnerView } from './components/views/TestRunnerView';
+const AgentConsoleLazy = React.lazy(() => import('./components/views/AgentConsoleView').then(m => ({ default: m.AgentConsoleView })));
+const AdminPanelLazy = React.lazy(() => import('./components/views/AdminPanelView').then(m => ({ default: m.AdminPanelView })));
 import { FieldOfficerDashboard } from './components/views/FieldOfficerDashboard';
 import { DeptOfficerDashboard } from './components/views/DeptOfficerDashboard';
 import { DataAnalystDashboard } from './components/views/DataAnalystDashboard';
+import { AuthorityDashboard } from './components/views/AuthorityDashboard';
+import { ReportingCenter } from './components/views/ReportingCenter';
 import { ReportDetailModal } from './components/views/ReportDetailModal';
 import { AuthModal } from './components/views/AuthModal';
+import { AccountLinkingModal } from './components/views/AccountLinkingModal';
 import { Report, Incident } from './types/scip';
-import { Home, ChevronRight, Shield } from 'lucide-react';
+import { Home, ChevronRight } from 'lucide-react';
 
 function SCIPMainLayout() {
   const { user, role, isAuthenticated } = useAuth();
@@ -51,9 +63,13 @@ function SCIPMainLayout() {
     setIsAuthModalOpen(true);
   };
 
-  // Route protection guard - allows public browsing on home, about, tests, track-report, departments
+  // Route protection guard - allows public browsing on public pages
   useEffect(() => {
-    const publicTabs = ['home', 'about', 'tests', 'track-report', 'departments'];
+    const publicTabs = [
+      'home', 'about', 'track-report', 'departments',
+      'features', 'how-it-works', 'community-reporting', 'ai-intelligence',
+      'contact', 'help-support', 'faq', 'privacy-policy', 'terms'
+    ];
     if (!isAuthenticated && !publicTabs.includes(currentTab)) {
       setCurrentTab('home');
       handleOpenAuth('login');
@@ -71,24 +87,35 @@ function SCIPMainLayout() {
   const getBreadcrumbLabel = (tab: string) => {
     switch (tab) {
       case 'home': return t('nav.home', 'Portal Home');
-      case 'about': return t('nav.citizen_charter', 'Citizen Charter & Responsible AI');
+      case 'about': return 'About SCIP';
+      case 'features': return 'Features';
+      case 'how-it-works': return 'How It Works';
+      case 'community-reporting': return 'Community Reporting';
+      case 'ai-intelligence': return 'AI Intelligence';
+      case 'contact': return 'Contact';
+      case 'help-support': return 'Help and Support';
+      case 'faq': return 'FAQ';
+      case 'privacy-policy': return 'Privacy Policy';
+      case 'terms': return 'Terms and Conditions';
       case 'citizen-dashboard': return t('nav.citizen_services', 'Citizen Services Dashboard');
       case 'submit-report': return t('nav.file_grievance', 'File a Community Grievance');
       case 'my-reports': return t('nav.my_grievances', 'My Submitted Observations');
       case 'track-report': return t('nav.track_grievance', 'Track Grievance Status');
-      case 'departments': return t('nav.departments', 'Municipal Departments Directory');
-      case 'field-officer-dashboard': return t('nav.field_operations', 'Field Officer Operations & Inspections');
+      case 'departments': return t('nav.departments', 'Departments Directory');
+      case 'field-officer-dashboard': return t('nav.field_operations', 'Field Officer Operations');
       case 'dept-officer-dashboard': return t('nav.dept_desk', 'Department Operations Desk');
-      case 'analyst-dashboard': return t('nav.analytics_models', 'Data & AI Analytics Command');
+      case 'analyst-dashboard': return t('nav.analytics_models', 'Analytics & Models');
       case 'intel-dashboard': return t('nav.command_center', 'Operations / Intelligence Command');
+      case 'authority-dashboard': return t('nav.command_center', 'Authority Strategic Dashboard');
       case 'incidents': return t('nav.incident_queue', 'Operations / Incident Queue');
       case 'investigation': return language === 'HI' ? 'फॉरेंसिक अन्वेषण' : 'Forensic Investigation';
       case 'map': return t('nav.geospatial_map', 'Geospatial Intelligence Map');
-      case 'trends': return t('nav.trends_recurrence', 'Trends & Recurrence Analytics');
+      case 'geo-analytics': return t('nav.geo_analytics', 'Geographic Analytics');
+      case 'trends': return t('nav.trends_recurrence', 'Trends & Recurrence');
       case 'agent': return t('nav.scip_agent', 'Decision Support Agent');
-      case 'admin-panel': return t('nav.admin_governance', 'Administration & Audit Trail');
-      case 'tests': return t('nav.system_audit', 'System Validation & Audit');
-      default: return language === 'HI' ? 'सरकारी पोर्टल' : 'Government Portal';
+      case 'reporting': return 'Reporting Center';
+      case 'admin-panel': return t('nav.admin_governance', 'Administration');
+      default: return language === 'HI' ? 'सरकारी पोर्टल' : 'Portal';
     }
   };
 
@@ -185,6 +212,42 @@ function SCIPMainLayout() {
           <AboutPage />
         )}
 
+        {currentTab === 'features' && (
+          <FeaturesPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'how-it-works' && (
+          <HowItWorksPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'community-reporting' && (
+          <CommunityReportingPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'ai-intelligence' && (
+          <AiIntelligencePage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'contact' && (
+          <ContactPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'help-support' && (
+          <HelpSupportPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'faq' && (
+          <FaqPage onNavigate={setCurrentTab} />
+        )}
+
+        {currentTab === 'privacy-policy' && (
+          <PrivacyPolicyPage />
+        )}
+
+        {currentTab === 'terms' && (
+          <TermsPage />
+        )}
+
         {currentTab === 'citizen-dashboard' && (
           <CitizenDashboard
             onNavigateToSubmit={() => setCurrentTab('submit-report')}
@@ -231,6 +294,10 @@ function SCIPMainLayout() {
           <GeospatialIntelligenceView />
         )}
 
+        {currentTab === 'geo-analytics' && (
+          <GeoAnalyticsView />
+        )}
+
         {currentTab === 'trends' && (
           <TrendAnalysisView />
         )}
@@ -247,17 +314,27 @@ function SCIPMainLayout() {
           <DataAnalystDashboard />
         )}
 
+        {currentTab === 'authority-dashboard' && (
+          <AuthorityDashboard />
+        )}
+
         {currentTab === 'agent' && (
-          <AgentConsoleView />
+          <Suspense fallback={null}>
+            <AgentConsoleLazy />
+          </Suspense>
+        )}
+
+        {currentTab === 'reporting' && (
+          <ReportingCenter />
         )}
 
         {currentTab === 'admin-panel' && (
-          <AdminPanelView />
+          <Suspense fallback={null}>
+            <AdminPanelLazy />
+          </Suspense>
         )}
 
-        {currentTab === 'tests' && (
-          <TestRunnerView />
-        )}
+        {false && null}
       </main>
 
       {/* 6. Global Report Detail Inspector Modal */}
@@ -282,6 +359,9 @@ function SCIPMainLayout() {
           setCurrentTab(targetTab);
         }}
       />
+
+      {/* 7b. Clerk Identity Linking (bootstrap for unlinked Clerk sign-ins) */}
+      <AccountLinkingModal />
 
       {/* 8. Rich Government Footer (Section L) */}
       <GovernmentFooter

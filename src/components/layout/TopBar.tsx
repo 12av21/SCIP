@@ -30,7 +30,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleMobileSidebar,
   onOpenAuth
 }) => {
-  const { user, role, switchDemoRole, logout } = useAuth();
+  const { user, role, logout } = useAuth();
   const { activeTheme, isThemeStudioOpen, openThemeStudio, closeThemeStudio } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -128,27 +128,6 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <span className="font-semibold uppercase tracking-wider text-emerald-700 text-[11px]">{role}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-emerald-600" />
               </button>
-
-              {isRoleDropdownOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-emerald-100 py-1 z-50">
-                  <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                    Switch Test Persona
-                  </div>
-                  {(['citizen', 'officer', 'authority', 'admin'] as UserRole[]).map(r => (
-                    <button
-                      key={r}
-                      onClick={() => {
-                        switchDemoRole(r);
-                        setIsRoleDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-emerald-50/60 transition-colors cursor-pointer ${role === r ? 'font-semibold text-emerald-700 bg-emerald-50' : 'text-slate-700'}`}
-                    >
-                      <span className="capitalize">{r}</span>
-                      {role === r && <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Notifications Dropdown */}
@@ -186,9 +165,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                           key={notif.id}
                           onClick={() => {
                             api.markNotificationRead(notif.id);
-                            if (notif.link?.startsWith('INC')) {
+                            if (notif.relatedEntityType === 'incident' && notif.relatedEntityId?.startsWith('INC')) {
                               onNavigate('incidents');
-                            } else if (notif.link?.startsWith('REP')) {
+                            } else if (notif.relatedEntityType === 'report' && notif.relatedEntityId?.startsWith('REP')) {
                               onNavigate('my-reports');
                             }
                             setIsNotifOpen(false);

@@ -2,11 +2,20 @@
 
 on:
   push:
-    branches: [main]
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_ENV: test
+  JWT_SECRET: test-jwt-secret-for-ci-isolated-12345678901234567890
+  DATABASE_DRIVER: json
+  DISABLE_RATE_LIMIT: 'true'
+  DISABLE_HMR: 'true'
 
 jobs:
-  validate:
+  lint-and-typecheck:
+    name: Lint & Typecheck
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -15,32 +24,167 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm ci
 
-      - name: Typecheck
+      - name: Run TypeScript typecheck
         run: npm run typecheck
 
-      - name: Production build
+  build:
+    name: Production Build
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vite production build
         run: npm run build
 
-      - name: Security smoke tests (isolated temp DB)
-        run: npm run test:security
-        env:
-          NODE_ENV: test
-          SCIP_DB_PATH: /tmp/scip-ci-isolated.json
-          JWT_SECRET: ci-test-jwt-secret-at-least-32-chars-long
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Security HTTP integration tests (isolated temp DB)
-        run: npm run test:security:http
-        env:
-          NODE_ENV: test
-          SCIP_DB_PATH: /tmp/scip-ci-isolated-http.json
-          JWT_SECRET: ci-test-jwt-secret-at-least-32-chars-long
-          DISABLE_RATE_LIMIT: "true"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Dependency audit (production)
-        run: npm audit --omit=dev
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security smoke tests
+        run: npx tsx scripts/security-smoke-test.mts
+
+      - name: Run security HTTP tests
+        run: npx tsx scripts/security-http-test.mts
+
+      - name: Run security HTTP location tests
+        run: npx tsx scripts/security-http-test-location.mts
+
+      - name: Run security headers tests
+        run: npx tsx scripts/security-headers-test.mts
+
+      - name: Run identity infrastructure tests
+        run: npx tsx scripts/identity-infrastructure-test.mts
+
+      - name: Run Clerk linking tests
+        run: npx tsx scripts/clerk-linking-test.mts
+
+  ai-tests:
+    name: AI Verification Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run AI model registry tests
+        run: npx tsx scripts/ai-model-registry-test.mts
+
+      - name: Run AI dataset tests
+        run: npx tsx scripts/ai-dataset-test.mts
+
+      - name: Run AI image intelligence tests
+        run: npx tsx scripts/ai-image-test.mts
+
+      - name: Run AI India civic intelligence tests
+        run: npx tsx scripts/ai-india-civic-test.mts
+
+      - name: Run AI verification tests
+        run: npx tsx scripts/ai-verification-test.mts
+
+      - name: Run LLM agent tests
+        run: npx tsx scripts/llm-agent-test.mts
+
+      - name: Run database management tests
+        run: npx tsx scripts/db-management-test.mts
+
+      - name: Run AI service adapter tests
+        run: npx tsx scripts/ai-service-adapter-test.mts
+
+      - name: Run AI service shapes tests
+        run: npx tsx scripts/ai-service-shapes-test.mts
+
+      - name: Run Hindi/Hinglish NLP tests
+        run: npx tsx scripts/ai-hindi-hinglish-test.mts
+
+  frontend-tests:
+    name: Frontend Robustness Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run API client robustness tests
+        run: npx tsx scripts/frontend-api-client-test.mts
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build web image
+        run: docker build -t scip-platform .
+
+      - name: Build AI service image
+        run: docker build -t scip-ai ./ai_service
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --omit=dev || true

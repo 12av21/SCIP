@@ -1,9 +1,10 @@
-﻿// SCIP Backend - Report Management Routes
+// SCIP Backend - Report Management Routes
 
 import { Router, Response } from 'express';
-import { db } from '../../database/scipDatabase.js';
+import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
-import { Report, ReportCategory, ReportStatus, UrgencyLevel } from '../../types/scip.js';
+import { Report, ReportCategory, ReportStatus, UrgencyLevel, LocationSource, ImageAnalysis } from '../../types/scip.js';
+import { processImageUpload, parseDataUrl, analyzeImage, extractImageMetadata } from '../../ai/imageIntelligence.js';
 
 const router = Router();
 
@@ -20,15 +21,14 @@ const REPORT_CATEGORIES: ReportCategory[] = [
 const URGENCY_LEVELS: UrgencyLevel[] = ['low', 'medium', 'high', 'critical'];
 const CITIZEN_EDITABLE_STATUSES: ReportStatus[] = ['submitted', 'analyzed'];
 
-function canAccessReport(user: { role: string; id: string; departmentId?: string }, report: Report): boolean {
+async function canAccessReport(user: { role: string; id: string; departmentId?: string }, report: Report): Promise<boolean> {
   if (user.role === 'citizen') return report.citizenId === user.id;
   if (user.role === 'officer' || user.role === 'dept_officer') {
     if (!user.departmentId) return false;
     if (!report.incidentId) return false;
-    const incident = db.getIncidentById(report.incidentId);
+    const incident = await db.getIncidentById(report.incidentId);
     return Boolean(incident && incident.assignedDepartmentId === user.departmentId);
   }
-  // analyst, authority, admin: read access per permission; PII minimization handled at serialization/export layer
   return true;
 }
 
@@ -52,6 +52,17 @@ function pickCitizenUpdates(body: any): Partial<Report> {
   const lng = Number(body.longitude);
   if (Number.isFinite(lat) && lat >= -90 && lat <= 90) out.latitude = lat;
   if (Number.isFinite(lng) && lng >= -180 && lng <= 180) out.longitude = lng;
+  if (typeof body.address === 'string') out.address = body.address.trim().slice(0, 500);
+  if (typeof body.landmark === 'string') out.landmark = body.landmark.trim().slice(0, 200);
+  if (typeof body.pinCode === 'string' && /^[1-9][0-9]{5}$/.test(body.pinCode)) out.pinCode = body.pinCode;
+  if (['gps', 'manual_map', 'geocoded', 'preset'].includes(body.locationSource)) out.locationSource = body.locationSource;
+  const acc = Number(body.locationAccuracyMeters);
+  if (Number.isFinite(acc) && acc >= 0 && acc <= 1000000) out.locationAccuracyMeters = acc;
+  if (typeof body.stateId === 'string') out.stateId = body.stateId;
+  if (typeof body.districtId === 'string') out.districtId = body.districtId;
+  if (typeof body.subDistrictId === 'string') out.subDistrictId = body.subDistrictId;
+  if (typeof body.blockId === 'string') out.blockId = body.blockId;
+  if (typeof body.localityId === 'string') out.localityId = body.localityId;
   if (Array.isArray(body.images)) {
     out.images = body.images.filter((x: any) => typeof x === 'string').slice(0, 10);
   }
@@ -59,7 +70,7 @@ function pickCitizenUpdates(body: any): Partial<Report> {
 }
 
 // GET /api/reports
-router.get('/', authenticate, requirePermission('report.read'), (req: AuthenticatedRequest, res: Response): void => {
+router.get('/', authenticate, requirePermission('report.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { category, status, urgency, myOnly } = req.query;
 
   const filter: any = {};
@@ -71,7 +82,7 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
     filter.citizenId = req.user?.id;
   }
 
-  let reports = db.getReports(filter);
+  let reports = await db.getReports(filter);
 
   if (req.user?.role === 'officer' || req.user?.role === 'dept_officer') {
     const deptId = req.user.departmentId;
@@ -79,11 +90,13 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
       res.status(403).json({ success: false, message: 'Department assignment required.' });
       return;
     }
-    reports = reports.filter(r => {
-      if (!r.incidentId) return false;
-      const inc = db.getIncidentById(r.incidentId);
-      return Boolean(inc && inc.assignedDepartmentId === deptId);
-    });
+    const filtered: typeof reports = [];
+    for (const r of reports) {
+      if (!r.incidentId) continue;
+      const inc = await db.getIncidentById(r.incidentId);
+      if (inc && inc.assignedDepartmentId === deptId) filtered.push(r);
+    }
+    reports = filtered;
   }
 
   const data = reports.map(r => sanitizeReportForRole(req.user!.role, r));
@@ -91,15 +104,15 @@ router.get('/', authenticate, requirePermission('report.read'), (req: Authentica
 });
 
 // GET /api/reports/:id
-router.get('/:id', authenticate, requirePermission('report.read'), (req: AuthenticatedRequest, res: Response): void => {
-  const report = db.getReportById(req.params.id);
+router.get('/:id', authenticate, requirePermission('report.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const report = await db.getReportById(req.params.id);
   if (!report) {
     res.status(404).json({ success: false, message: `Report ${req.params.id} not found.` });
     return;
   }
 
-  if (!canAccessReport(req.user!, report)) {
-    db.logAudit({
+  if (!(await canAccessReport(req.user!, report))) {
+    await db.logAudit({
       action: 'SECURITY_EVENT',
       module: 'security',
       recordId: report.id,
@@ -113,7 +126,7 @@ router.get('/:id', authenticate, requirePermission('report.read'), (req: Authent
     return;
   }
 
-  const analysis = db.getAIAnalysisForReport(req.params.id);
+  const analysis = await db.getAIAnalysisForReport(req.params.id);
   res.json({
     success: true,
     data: { report: sanitizeReportForRole(req.user!.role, report), analysis: analysis || null }
@@ -125,7 +138,7 @@ router.post(
   '/',
   authenticate,
   requirePermission('report.create'),
-  (req: AuthenticatedRequest, res: Response): void => {
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
         title,
@@ -136,15 +149,22 @@ router.post(
         latitude,
         longitude,
         urgency = 'medium',
-        images
+        images,
+        // Complaint location fields (additive, distinct from citizen residence)
+        stateId,
+        districtId,
+        subDistrictId,
+        blockId,
+        localityId,
+        address,
+        landmark,
+        pinCode,
+        locationSource = 'manual_map',
+        locationAccuracyMeters
       } = req.body || {};
 
       if (typeof title !== 'string' || typeof description !== 'string' || typeof locationName !== 'string') {
-        res.status(400).json({
-          success: false,
-          message: 'Title, description, and location are required fields.',
-          errors: ['Missing mandatory fields.']
-        });
+        res.status(400).json({ success: false, message: 'Title, description, and location are required fields.', errors: ['Missing mandatory fields.'] });
         return;
       }
       const safeTitle = title.trim();
@@ -178,32 +198,124 @@ router.post(
         res.status(400).json({ success: false, message: 'Invalid urgency level.', errors: ['Invalid urgency.'] });
         return;
       }
+
+      // Validate complaint location fields
+      const validLocationSource = ['gps', 'manual_map', 'geocoded', 'preset'].includes(locationSource) ? locationSource : 'manual_map';
+      let safeAccuracyMeters: number | undefined;
+      if (locationAccuracyMeters !== undefined && locationAccuracyMeters !== null && locationAccuracyMeters !== '') {
+        const acc = Number(locationAccuracyMeters);
+        if (!Number.isFinite(acc) || acc < 0 || acc > 1000000) {
+          res.status(400).json({ success: false, message: 'Location accuracy must be a non-negative number in metres.', errors: ['Invalid location accuracy.'] });
+          return;
+        }
+        safeAccuracyMeters = acc;
+      }
+      let safePinCode: string | undefined;
+      if (pinCode !== undefined && pinCode !== null && pinCode !== '') {
+        if (typeof pinCode !== 'string' || !/^[1-9][0-9]{5}$/.test(pinCode)) {
+          res.status(400).json({ success: false, message: 'PIN code must be a six-digit Indian PIN code.', errors: ['Invalid PIN code.'] });
+          return;
+        }
+        safePinCode = pinCode;
+      }
+
+      // Validate administrative references exist if provided
+      if (stateId && typeof stateId === 'string' && !db.getAdminStateById(stateId)) {
+        res.status(400).json({ success: false, message: 'Invalid stateId.', errors: ['Invalid administrative state.'] });
+        return;
+      }
+      if (districtId && typeof districtId === 'string' && !db.getAdminDistrictById(districtId)) {
+        res.status(400).json({ success: false, message: 'Invalid districtId.', errors: ['Invalid administrative district.'] });
+        return;
+      }
+      if (subDistrictId && typeof subDistrictId === 'string' && !db.getAdminSubDistrictById(subDistrictId)) {
+        res.status(400).json({ success: false, message: 'Invalid subDistrictId.', errors: ['Invalid administrative sub-district.'] });
+        return;
+      }
+      if (blockId && typeof blockId === 'string' && !db.getAdminBlockById(blockId)) {
+        res.status(400).json({ success: false, message: 'Invalid blockId.', errors: ['Invalid administrative block.'] });
+        return;
+      }
+      if (localityId && typeof localityId === 'string' && !db.getAdminLocalityById(localityId)) {
+        res.status(400).json({ success: false, message: 'Invalid localityId.', errors: ['Invalid administrative locality.'] });
+        return;
+      }
+
       const safeSubcategory = typeof subcategory === 'string' ? subcategory.trim().slice(0, 120) : undefined;
       const safeImages = Array.isArray(images) ? images.filter((x: any) => typeof x === 'string' && x.length < 2048).slice(0, 10) : [];
+      const safeAddress = typeof address === 'string' ? address.trim().slice(0, 500) : undefined;
+      const safeLandmark = typeof landmark === 'string' ? landmark.trim().slice(0, 200) : undefined;
+      const safeLocationName = typeof locationName === 'string' ? locationName.trim() : '';
+      const now = new Date().toISOString();
 
       const user = req.user!;
-      const { report, analysis } = db.createReport({
+      const { report, analysis } = await db.createReport({
         title: safeTitle,
         description: safeDescription,
         category,
         subcategory: safeSubcategory,
-        locationName: safeLocation,
+        locationName: safeLocationName,
         latitude: validLat,
         longitude: validLng,
         citizenId: user.id,
         citizenName: user.name,
         citizenEmail: user.email,
         urgency,
-        images: safeImages
+        images: safeImages,
+        stateId: typeof stateId === 'string' ? stateId : undefined,
+        districtId: typeof districtId === 'string' ? districtId : undefined,
+        subDistrictId: typeof subDistrictId === 'string' ? subDistrictId : undefined,
+        blockId: typeof blockId === 'string' ? blockId : undefined,
+        localityId: typeof localityId === 'string' ? localityId : undefined,
+        pinCode: safePinCode,
+        locationSource: validLocationSource as LocationSource,
+        locationAccuracyMeters: safeAccuracyMeters,
+        locationConfirmedAt: now,
+        address: safeAddress,
+        landmark: safeLandmark
       });
+
+      // --- Image Intelligence Integration (Phase 5) ---
+      // Analyze each attached image via the AI pipeline (local heuristic + Python service OCR/vision).
+      const imageEvidence: string[] = [];
+      const imageAnalyses: ImageAnalysis[] = [];
+      for (const imageDataUrl of safeImages) {
+        try {
+          const parsed = parseDataUrl(imageDataUrl);
+          if (!parsed) continue;
+          const meta = extractImageMetadata(parsed.buffer, 'upload', user.id);
+          if (parsed.mimeType && parsed.mimeType !== 'application/octet-stream') {
+            meta.mimeType = parsed.mimeType;
+          }
+          const analysis = await analyzeImage(parsed.buffer, meta, `${safeTitle}: ${safeDescription}`);
+          imageAnalyses.push(analysis);
+          const obs: string[] = [];
+          if (analysis.ocrText) obs.push(`OCR: "${analysis.ocrText}"`);
+          if (analysis.detectedObjects.length) obs.push(`Objects: ${analysis.detectedObjects.join(', ')}`);
+          if (analysis.sceneLabels.length) obs.push(`Scene: ${analysis.sceneLabels.join(', ')}`);
+          if (analysis.hasDamage) obs.push('Damage indicators detected');
+          if (obs.length) imageEvidence.push(`Image ${meta.imageId}: ${obs.join('; ')}`);
+        } catch {
+          // Image analysis is additive; do not fail report creation if image processing fails
+        }
+      }
+
+      // Merge image observations into the stored AI analysis
+      if (imageEvidence.length) {
+        try {
+          const updatedAnalysis = await db.updateAIAnalysis(report.id, {
+            evidence: [...analysis.evidence, ...imageEvidence]
+          });
+          analysis.evidence = updatedAnalysis.evidence;
+        } catch {
+          // Non-fatal; analysis already stored without image evidence
+        }
+      }
 
       res.status(201).json({
         success: true,
         message: 'Report submitted and processed by SCIP intelligence pipeline.',
-        data: {
-          report,
-          analysis
-        }
+        data: { report, analysis, imageAnalyses }
       });
     } catch (err: any) {
       res.status(500).json({
@@ -216,15 +328,15 @@ router.post(
 );
 
 // PUT /api/reports/:id
-router.put('/:id', authenticate, requirePermission('report.update'), (req: AuthenticatedRequest, res: Response): void => {
+router.put('/:id', authenticate, requirePermission('report.update'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const existing = db.getReportById(req.params.id);
+    const existing = await db.getReportById(req.params.id);
     if (!existing) {
       res.status(404).json({ success: false, message: 'Report not found.' });
       return;
     }
-    if (!canAccessReport(user, existing)) {
+    if (!(await canAccessReport(user, existing))) {
       res.status(403).json({ success: false, message: 'Forbidden: not authorized to modify this report.' });
       return;
     }
@@ -249,7 +361,6 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
         return;
       }
     } else if (user.role === 'dept_officer' || user.role === 'authority' || user.role === 'admin') {
-      // Staff can only perform limited status workflow updates via allowlist; ownership/PII/system fields immutable here.
       const status = req.body?.status as ReportStatus | undefined;
       const allowedStaffStatuses: ReportStatus[] = ['under_review', 'assigned', 'resolved', 'closed'];
       if (status && allowedStaffStatuses.includes(status)) {
@@ -259,7 +370,7 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
         return;
       }
       if (user.role === 'dept_officer' && user.departmentId) {
-        const inc = existing.incidentId ? db.getIncidentById(existing.incidentId) : undefined;
+        const inc = existing.incidentId ? await db.getIncidentById(existing.incidentId) : undefined;
         if (!inc || inc.assignedDepartmentId !== user.departmentId) {
           res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' });
           return;
@@ -270,7 +381,7 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
       return;
     }
 
-    const updated = db.updateReport(req.params.id, updates, user);
+    const updated = await db.updateReport(req.params.id, updates, user);
     res.json({ success: true, message: 'Report updated successfully.', data: sanitizeReportForRole(user.role, updated) });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
@@ -279,10 +390,10 @@ router.put('/:id', authenticate, requirePermission('report.update'), (req: Authe
 });
 
 // DELETE /api/reports/:id (Withdraw report)
-router.delete('/:id', authenticate, requirePermission('report.update'), (req: AuthenticatedRequest, res: Response): void => {
+router.delete('/:id', authenticate, requirePermission('report.update'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const existing = db.getReportById(req.params.id);
+    const existing = await db.getReportById(req.params.id);
     if (!existing) {
       res.status(404).json({ success: false, message: 'Report not found.' });
       return;
@@ -299,7 +410,7 @@ router.delete('/:id', authenticate, requirePermission('report.update'), (req: Au
       res.status(400).json({ success: false, message: 'Report is already closed.' });
       return;
     }
-    const withdrawn = db.withdrawReport(req.params.id, user);
+    const withdrawn = await db.withdrawReport(req.params.id, user);
     res.json({ success: true, message: `Report ${req.params.id} has been withdrawn.`, data: sanitizeReportForRole(user.role, withdrawn) });
   } catch (err: any) {
     res.status(403).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message });
@@ -311,7 +422,7 @@ router.post(
   '/:id/reject',
   authenticate,
   requirePermission('incident.update'),
-  (req: AuthenticatedRequest, res: Response): void => {
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { reason } = req.body || {};
       if (typeof reason !== 'string' || !reason.trim()) {
@@ -323,13 +434,13 @@ router.post(
         return;
       }
 
-      const report = db.getReportById(req.params.id);
+      const report = await db.getReportById(req.params.id);
       if (!report) {
         res.status(404).json({ success: false, message: 'Report not found' });
         return;
       }
 
-      if (!canAccessReport(req.user!, report)) {
+      if (!(await canAccessReport(req.user!, report))) {
         res.status(403).json({ success: false, message: 'Forbidden.' });
         return;
       }
@@ -338,16 +449,20 @@ router.post(
         return;
       }
 
-      const updated = db.updateReport(req.params.id, { status: 'closed' }, req.user!);
-      db.createNotification({
+      const updated = await db.updateReport(req.params.id, { status: 'closed' }, req.user!);
+      await db.createNotification({
         userId: report.citizenId,
+        eventType: 'report_status_changed',
         title: 'Report Rejected by Authority',
         message: `Your report ${report.id} was reviewed and rejected. Reason: "${reason.trim().slice(0, 500)}"`,
-        type: 'report_status',
-        link: report.id
+        channels: ['in_app'],
+        priority: 'medium',
+        data: { reportId: report.id, newStatus: 'rejected', reason: reason.trim().slice(0, 500) },
+        relatedEntityId: report.id,
+        relatedEntityType: 'report'
       });
 
-      db.logAudit({
+      await db.logAudit({
         action: 'REPORT_REJECTED',
         module: 'reports',
         recordId: report.id,
@@ -370,27 +485,20 @@ router.post(
   '/:id/reanalyze',
   authenticate,
   requirePermission('intelligence.read'),
-  (req: AuthenticatedRequest, res: Response): void => {
-    const report = db.getReportById(req.params.id);
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const report = await db.getReportById(req.params.id);
     if (!report) {
       res.status(404).json({ success: false, message: 'Report not found' });
       return;
     }
-    if (!canAccessReport(req.user!, report)) {
+    if (!(await canAccessReport(req.user!, report))) {
       res.status(403).json({ success: false, message: 'Forbidden: not authorized to access this report.' });
       return;
     }
 
-    const freshAnalysis = db.runAndStoreAIAnalysis(report, true);
-    res.json({
-      success: true,
-      message: 'AI re-analysis completed.',
-      data: freshAnalysis
-    });
+    const freshAnalysis = await db.runAndStoreAIAnalysis(report, true);
+    res.json({ success: true, message: 'AI re-analysis completed.', data: freshAnalysis });
   }
 );
 
 export default router;
-
-
-

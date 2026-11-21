@@ -1,6 +1,5 @@
-// Mongoose Schema for Incident Entity
-import mongoose, { Schema, Document } from 'mongoose';
-import { ReportCategory, IncidentStatus, UrgencyLevel } from '../../types/scip.js';
+﻿import mongoose, { Schema, Document } from 'mongoose';
+import { ReportCategory, IncidentStatus, IncidentPriority, UrgencyLevel } from '../../types/scip.js';
 
 export interface IIncidentDocument extends Document {
   id: string;
@@ -13,7 +12,7 @@ export interface IIncidentDocument extends Document {
   radiusMeters: number;
   reportIds: string[];
   severity: UrgencyLevel;
-  priority: 'P1' | 'P2' | 'P3' | 'P4';
+  priority: IncidentPriority | 'P1' | 'P2' | 'P3' | 'P4';
   confidence: number;
   status: IncidentStatus;
   isAIGenerated: boolean;
@@ -28,6 +27,12 @@ export interface IIncidentDocument extends Document {
   resolutionNotes?: string;
   resolvedAt?: string;
   evidence: string[];
+  // India location context (additive, preserves existing records)
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,11 +49,11 @@ const IncidentSchema = new Schema<IIncidentDocument>(
     radiusMeters: { type: Number, default: 500 },
     reportIds: [{ type: String }],
     severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
-    priority: { type: String, enum: ['P1', 'P2', 'P3', 'P4'], default: 'P3', index: true },
+    priority: { type: String, enum: ['P1_CRITICAL', 'P2_HIGH', 'P3_MEDIUM', 'P4_LOW', 'P1', 'P2', 'P3', 'P4'], default: 'P3_MEDIUM', index: true },
     confidence: { type: Number, default: 0.8 },
     status: {
       type: String,
-      enum: ['potential', 'confirmed', 'in_progress', 'resolved', 'closed', 'dismissed'],
+      enum: ['potential', 'under_review', 'confirmed', 'in_progress', 'resolved', 'closed', 'dismissed'],
       default: 'potential',
       index: true
     },
@@ -63,14 +68,24 @@ const IncidentSchema = new Schema<IIncidentDocument>(
     assignedOfficerName: { type: String },
     resolutionNotes: { type: String },
     resolvedAt: { type: String },
-    evidence: [{ type: String }]
+    evidence: [{ type: String }],
+    // India location context (additive, preserves existing records)
+    stateId: { type: String },
+    districtId: { type: String },
+    subDistrictId: { type: String },
+    blockId: { type: String },
+    localityId: { type: String },
+    createdAt: { type: String, required: true, index: true },
+    updatedAt: { type: String, required: true }
   },
-  {
-    timestamps: true
-  }
+  { timestamps: false }
 );
 
 IncidentSchema.index({ latitude: 1, longitude: 1 });
 IncidentSchema.index({ createdAt: -1 });
+// Composite index for active-incident officer lookups
+IncidentSchema.index({ assignedOfficerId: 1, status: 1 });
+// Composite index for department-scoped incident queries
+IncidentSchema.index({ assignedDepartmentId: 1, status: 1 });
 
 export const IncidentModel = mongoose.models.Incident || mongoose.model<IIncidentDocument>('Incident', IncidentSchema);

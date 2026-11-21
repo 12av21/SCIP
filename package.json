@@ -6,16 +6,26 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "start": "node server.ts",
+    "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test:security": "tsx scripts/security-smoke-test.mts",
-    "test:security:http": "tsx scripts/security-http-test.mts",
-    "test:security:all": "npm run test:security && npm run test:security:http"
+    "test:security": "set NODE_ENV=test&& set SCIP_TEST_DB_PATH=tmp/test_security.db&& tsx scripts/security-smoke-test.mts",
+    "test:security:http": "set NODE_ENV=test&& set SCIP_TEST_DB_PATH=tmp/test_security_http.db&& tsx scripts/security-http-test.mts",
+    "test:security:all": "npm run test:security && npm run test:security:http",
+    "test:identity": "set NODE_ENV=test&& set SCIP_TEST_DB_PATH=tmp/test_identity.db&& tsx scripts/identity-infrastructure-test.mts",
+    "test:linking": "set NODE_ENV=test&& set SCIP_TEST_DB_PATH=tmp/test_linking.db&& tsx scripts/clerk-linking-test.mts",
+    "test:llm": "tsx scripts/llm-agent-test.mts",
+    "test:ai-service": "tsx scripts/ai-service-shapes-test.mts",
+    "test:ai-adapter": "tsx scripts/ai-service-adapter-test.mts",
+    "test:security:headers": "tsx scripts/security-headers-test.mts",
+    "test:frontend": "set NODE_ENV=test&& set SCIP_TEST_DB_PATH=tmp/test_frontend.db&& tsx scripts/frontend-api-client-test.mts",
+    "test:e2e": "tsx scripts/e2e-test.mts"
   },
   "dependencies": {
+    "@clerk/backend": "^3.29.0",
+    "@clerk/clerk-js": "^6.43.1",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/leaflet": "^1.9.22",
@@ -37,6 +47,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/express": "^4.17.21",
+    "@types/google.maps": "^3.67.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",

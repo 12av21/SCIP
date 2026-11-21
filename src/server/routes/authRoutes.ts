@@ -1,430 +1,152 @@
-﻿// SCIP Backend - Auth Routes
+// SCIP Backend - Auth Routes (Phase 3.1: Clerk migration)
+// Clerk is the Identity Provider; SCIP remains the application data source and RBAC authority.
+// Custom password-based auth (register/login/change-password/reset-password) is delegated to Clerk.
+// SCIP routes: /me (current user), /logout (session invalidation), /profile (profile update), /account (deletion).
+
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db } from '../../database/scipDatabase.js';
-import { authenticate, AuthenticatedRequest, getJwtSecret } from '../middleware/auth.js';
+import { db } from '../../database/index.js';
+import { authenticate, AuthenticatedRequest, logIpSecurityEvent } from '../middleware/auth.js';
 import { User } from '../../types/scip.js';
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY || 'dev-secret-change-in-production';
+const AUTH_PROVIDER = (process.env.AUTH_PROVIDER || 'clerk').toLowerCase();
 
 const router = Router();
 
+// Native auth endpoints only available when AUTH_PROVIDER=native
+// When using Clerk (default), auth is delegated to Clerk and these endpoints return 404
+if (AUTH_PROVIDER === 'native') {
+  // Native auth: register
+  router.post('/register', async (req: any, res: Response): Promise<void> => {
+  try {
+    const { name, email, password, phone } = req.body || {};
+    if (!name || !email || !password) { res.status(400).json({ success: false, message: 'Name, email and password are required.' }); return; }
+    if (password.length < 8) { res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' }); return; }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await db.getUserByEmailWithPassword(normalizedEmail);
+    if (existing) { res.status(409).json({ success: false, message: 'An account with this email already exists.' }); return; }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await db.createUser({ name: name.trim(), email: normalizedEmail, passwordHash, role: 'citizen', status: 'active', phone: phone?.trim() } as any);
+    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('scip_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*24*60*60*1000 });
+    res.status(201).json({ success: true, message: 'Registration successful.', data: { user: sanitizeAuthUser(user) } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Registration failed.' : err.message });
+  }
+});
+
+// Native auth: login
+router.post('/login', async (req: any, res: Response): Promise<void> => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) { res.status(400).json({ success: false, message: 'Email and password are required.' }); return; }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await db.getUserByEmailWithPassword(normalizedEmail);
+    if (!user || !user.passwordHash) { res.status(401).json({ success: false, message: 'Invalid email or password.' }); return; }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) { res.status(401).json({ success: false, message: 'Invalid email or password.' }); return; }
+    if (user.status !== 'active') { res.status(403).json({ success: false, message: 'Account is not active.' }); return; }
+    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('scip_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7*24*60*60*1000 });
+    res.json({ success: true, message: 'Login successful.', data: { user: sanitizeAuthUser(user) } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Login failed.' : err.message });
+  }
+});
+} // End of AUTH_PROVIDER === 'native' block
+
+// Explicit allowlist of User fields safe to return to the authenticated owner.
+// Never expose password hashes, session state, verification secrets, or internal
+// verification counters (denylist-free: anything not listed is dropped).
+const AUTH_USER_PUBLIC_FIELDS = [
+  'id', 'clerkUserId', 'name', 'email', 'role', 'departmentId', 'departmentName',
+  'phone', 'status', 'emailVerified', 'phoneVerified',
+  'stateId', 'districtId', 'subDistrictId', 'blockId', 'localityId', 'pinCode', 'residenceAddress',
+  'jurisdictionStateIds', 'jurisdictionDistrictIds', 'jurisdictionSubDistrictIds',
+  'jurisdictionBlockIds', 'jurisdictionLocalityIds',
+  'createdAt', 'updatedAt'
+] as const;
+
 function sanitizeAuthUser(user: any) {
   if (!user) return user;
-  const { passwordHash, sessionVersion, credentialsResetRequired, ...safe } = user;
+  const safe: Record<string, unknown> = {};
+  for (const key of AUTH_USER_PUBLIC_FIELDS) {
+    if (user[key] !== undefined) safe[key] = user[key];
+  }
   return safe;
 }
 
-function signToken(user: User): string {
-  return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, sv: user.sessionVersion ?? 0 },
-    getJwtSecret(),
-    { expiresIn: '7d' }
-  );
-}
-
-function isPublicRegistrationEnabled(): boolean {
-  // Self-registration is for citizen accounts only; privileged roles require admin provisioning.
-  return true;
-}
-
-// POST /api/auth/register
-router.post('/register', async (req, res: Response): Promise<void> => {
-  try {
-    const { name, email, password, role = 'citizen', phone } = req.body || {};
-
-    if (typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
-      res.status(400).json({ success: false, message: 'Name, email, and password are required.', errors: ['Missing required fields.'] });
-      return;
-    }
-    const safeName = name.trim();
-    const safeEmail = email.trim().toLowerCase();
-    if (!safeName || !safeEmail || !password) {
-      res.status(400).json({ success: false, message: 'Name, email, and password are required.', errors: ['Missing required fields.'] });
-      return;
-    }
-    if (safeName.length > 100) {
-      res.status(400).json({ success: false, message: 'Name must be 100 characters or fewer.', errors: ['Invalid name.'] });
-      return;
-    }
-    if (phone !== undefined && (typeof phone !== 'string' || phone.trim().length > 30)) {
-      res.status(400).json({ success: false, message: 'Phone must be 30 characters or fewer.', errors: ['Invalid phone.'] });
-      return;
-    }
-
-    if (password.length < 8 || password.length > 128) {
-      res.status(400).json({ success: false, message: 'Password must be 8-128 characters in length.', errors: ['Weak password.'] });
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(safeEmail) || safeEmail.length > 254) {
-      res.status(400).json({ success: false, message: 'Please provide a valid email address.', errors: ['Invalid email format.'] });
-      return;
-    }
-
-    const existing = db.getUserByEmailWithPassword(safeEmail);
-    if (existing) {
-      res.status(409).json({
-        success: false,
-        message: 'An account with this email address already exists.',
-        errors: ['Duplicate email.']
-      });
-      return;
-    }
-
-    if (!isPublicRegistrationEnabled()) {
-      res.status(403).json({ success: false, message: 'Public registration is disabled.' });
-      return;
-    }
-
-    // Prevent privilege escalation: public registration can only create citizen accounts.
-    const requestedRole = typeof role === 'string' ? role : 'citizen';
-    if (requestedRole !== 'citizen') {
-      res.status(403).json({
-        success: false,
-        message: 'Privileged roles cannot be self-assigned during registration.',
-        errors: ['Role assignment restricted.']
-      });
-      return;
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
-
-    const newUser = db.createUser({
-      name: safeName,
-      email: safeEmail,
-      passwordHash,
-      role: 'citizen',
-      phone: typeof phone === 'string' ? phone.trim() : undefined,
-      status: 'active',
-      sessionVersion: 0,
-      credentialsResetRequired: false
-    } as any);
-
-    const token = signToken(newUser as User);
-
-    res.status(201).json({
-      success: true,
-      message: 'Registration successful.',
-      data: {
-        user: sanitizeAuthUser(newUser),
-        token
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to complete registration.',
-      errors: [process.env.NODE_ENV === 'production' ? 'Registration failed.' : err.message]
-    });
-  }
+// GET /api/auth/me — current authenticated user (SCIP record, no token; Clerk provides the token)
+router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  res.json({ success: true, data: sanitizeAuthUser(req.user) });
 });
 
-// POST /api/auth/login
-router.post('/login', async (req, res: Response): Promise<void> => {
-  try {
-    const { email, password } = req.body || {};
-
-    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
-      res.status(400).json({
-        success: false,
-        message: 'Email and password are required.',
-        errors: ['Missing credentials.']
-      });
-      return;
-    }
-    if (email.length > 254 || password.length > 128) {
-      res.status(401).json({
-        success: false,
-        message: 'Invalid email or password credentials.',
-        errors: ['Authentication failed.']
-      });
-      return;
-    }
-
-    const lookupEmail = email.trim().toLowerCase();
-    const userWithPassword = db.getUserByEmailWithPassword(lookupEmail) || db.getUserByEmailWithPassword(email.trim());
-    if (!userWithPassword || !userWithPassword.passwordHash) {
-      db.logAudit({
-        action: 'LOGIN_FAILED',
-        module: 'auth',
-        userId: 'UNKNOWN',
-        userEmail: typeof email === 'string' ? email : 'UNKNOWN',
-        userRole: 'citizen',
-        ipAddress: req.ip || '127.0.0.1',
-        details: `Login attempt failed: account not found or credentials unavailable`
-      });
-
-      res.status(401).json({
-        success: false,
-        message: 'Invalid email or password credentials.',
-        errors: ['Authentication failed.']
-      });
-      return;
-    }
-
-    const passwordMatch = await bcrypt.compare(password, userWithPassword.passwordHash);
-
-    if (!passwordMatch) {
-      db.logAudit({
-        action: 'LOGIN_FAILED',
-        module: 'auth',
-        userId: userWithPassword.id,
-        userEmail: userWithPassword.email,
-        userRole: userWithPassword.role,
-        ipAddress: req.ip || '127.0.0.1',
-        details: `Login attempt failed: invalid credentials`
-      });
-
-      res.status(401).json({
-        success: false,
-        message: 'Invalid email or password credentials.',
-        errors: ['Authentication failed.']
-      });
-      return;
-    }
-
-    if (userWithPassword.status === 'suspended') {
-      res.status(403).json({
-        success: false,
-        message: 'Account is suspended. Contact system administrator.',
-        errors: ['Account suspended.']
-      });
-      return;
-    }
-
-    if ((userWithPassword as any).credentialsResetRequired) {
-      res.status(403).json({
-        success: false,
-        message: 'Credential reset required. Please complete account recovery.',
-        errors: ['Credential reset required.']
-      });
-      return;
-    }
-
-    const token = signToken(userWithPassword as User);
-
-    db.logAudit({
-      action: 'LOGIN_SUCCESS',
-      module: 'auth',
-      userId: userWithPassword.id,
-      userEmail: userWithPassword.email,
-      userRole: userWithPassword.role,
-      ipAddress: req.ip || '127.0.0.1',
-      details: `User authenticated successfully`
-    });
-
-    res.json({
-      success: true,
-      message: 'Login successful.',
-      data: {
-        user: sanitizeAuthUser(userWithPassword),
-        token
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during login.',
-      errors: [process.env.NODE_ENV === 'production' ? 'Login failed.' : (err.message || 'Login failed.')]
-    });
-  }
-});
-
-// POST /api/auth/demo-login
-// Development-only helper. Disabled in production and requires explicit opt-in.
-router.post('/demo-login', async (req, res: Response): Promise<void> => {
-  const enabled = process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_DEMO_LOGIN === 'true';
-  if (!enabled) {
-    res.status(404).json({ success: false, message: 'Not found.' });
-    return;
-  }
-
-  const { role } = req.body || {};
-  const users = db.getUsers();
-  const demoUser = users.find(u => u.role === role) || users.find(u => u.role === 'citizen') || users[0];
-  if (!demoUser) {
-    res.status(503).json({ success: false, message: 'No demo account available.' });
-    return;
-  }
-
-  const token = signToken(demoUser as unknown as User);
-
-  db.logAudit({
-    action: 'LOGIN_SUCCESS',
-    module: 'auth',
-    userId: demoUser.id,
-    userEmail: demoUser.email,
-    userRole: demoUser.role,
-    ipAddress: req.ip || '127.0.0.1',
-    details: `Development demo session activated (role: ${demoUser.role})`
-  });
-
-  res.json({
-    success: true,
-    message: `Development session activated for ${demoUser.role}.`,
-    data: {
-      user: sanitizeAuthUser(demoUser),
-      token
-    }
-  });
-});
-
-// GET /api/auth/me
-router.get('/me', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  res.json({
-    success: true,
-    data: sanitizeAuthUser(req.user)
-  });
-});
-
-// POST /api/auth/logout
-router.post('/logout', authenticate, (req: AuthenticatedRequest, res: Response): void => {
+// POST /api/auth/logout — invalidate SCIP session + redirect to Clerk logout
+router.post('/logout', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   if (req.user) {
-    try {
-      db.invalidateUserSessions(req.user.id);
-    } catch {
-      // Best-effort server-side revocation; token expiry still applies.
-    }
-    db.logAudit({
-      action: 'LOGOUT',
-      module: 'auth',
-      userId: req.user.id,
-      userEmail: req.user.email,
-      userRole: req.user.role,
-      ipAddress: req.ip || '127.0.0.1',
-      details: `User logged out; sessions invalidated`
+    try { await db.invalidateUserSessions(req.user.id); } catch {}
+    await logIpSecurityEvent({
+      req, eventType: 'LOGOUT', success: true,
+      userId: req.user.id, userEmail: req.user.email, userRole: req.user.role,
+      details: 'User logged out via Clerk; SCIP session invalidated'
     });
+    await db.logAudit({ action: 'LOGOUT', module: 'auth', userId: req.user.id, userEmail: req.user.email, userRole: req.user.role, ipAddress: req.ip || '127.0.0.1', details: 'User logged out via Clerk' });
   }
-  res.json({
-    success: true,
-    message: 'Logged out successfully.'
-  });
+  res.clearCookie('scip_token');
+  res.json({ success: true, message: 'Logged out successfully.', redirect: '/login' });
 });
 
-// POST /api/auth/change-password
-router.post('/change-password', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// PUT /api/auth/profile — authenticated profile update
+router.put('/profile', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { oldPassword, newPassword } = req.body || {};
-    if (typeof oldPassword !== 'string' || typeof newPassword !== 'string') {
-      res.status(400).json({ success: false, message: 'Old password and new password are required.' });
-      return;
-    }
-    if (oldPassword.length > 128) {
-      res.status(401).json({ success: false, message: 'Current password incorrect.' });
-      return;
-    }
-    if (newPassword.length < 8 || newPassword.length > 128) {
-      res.status(400).json({ success: false, message: 'New password must be 8-128 characters in length.' });
-      return;
-    }
-
-    const userWithPassword = db.getUserByEmailWithPassword(req.user!.email);
-    if (!userWithPassword || !userWithPassword.passwordHash) {
-      res.status(400).json({ success: false, message: 'User password record not found.' });
-      return;
-    }
-
-    const matches = await bcrypt.compare(oldPassword, userWithPassword.passwordHash);
-
-    if (!matches) {
-      res.status(401).json({ success: false, message: 'Current password incorrect.' });
-      return;
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const newHash = await bcrypt.hash(newPassword, salt);
-    db.changeUserPassword(req.user!.id, newHash);
-
-    res.json({ success: true, message: 'Password changed successfully. Please sign in again.' });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: 'Failed to update password.', errors: [process.env.NODE_ENV === 'production' ? 'Update failed.' : (err.message || 'Update failed.')] });
-  }
-});
-
-// PUT /api/auth/profile
-router.put('/profile', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  try {
-    const { name, phone } = req.body || {};
-    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 100)) {
-      res.status(400).json({ success: false, message: 'Name must be a non-empty string up to 100 characters.' });
-      return;
-    }
-    if (phone !== undefined && (typeof phone !== 'string' || phone.trim().length > 30)) {
-      res.status(400).json({ success: false, message: 'Phone must be a string up to 30 characters.' });
-      return;
-    }
-    const updates: { name?: string; phone?: string } = {};
+    const { name, phone, stateId, districtId, subDistrictId, blockId, localityId, pinCode, residenceAddress } = req.body || {};
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 100)) { res.status(400).json({ success: false, message: 'Name must be a non-empty string up to 100 characters.' }); return; }
+    if (phone !== undefined && (typeof phone !== 'string' || phone.trim().length > 30)) { res.status(400).json({ success: false, message: 'Phone must be a string up to 30 characters.' }); return; }
+    if (pinCode !== undefined && pinCode !== null && pinCode !== '' && (typeof pinCode !== 'string' || !/^[1-9][0-9]{5}$/.test(pinCode))) { res.status(400).json({ success: false, message: 'PIN code must be a six-digit Indian PIN code.', errors: ['Invalid PIN code.'] }); return; }
+    const updates: { name?: string; phone?: string; stateId?: string; districtId?: string; subDistrictId?: string; blockId?: string; localityId?: string; pinCode?: string; residenceAddress?: string } = {};
     if (typeof name === 'string') updates.name = name.trim();
     if (typeof phone === 'string') updates.phone = phone.trim();
-    if (Object.keys(updates).length === 0) {
-      res.status(400).json({ success: false, message: 'No valid profile fields provided.' });
-      return;
-    }
-    const updated = db.updateUserProfile(req.user!.id, updates);
-    res.json({ success: true, message: 'Profile updated successfully.', data: updated });
+    if (typeof stateId === 'string') updates.stateId = stateId.trim();
+    if (typeof districtId === 'string') updates.districtId = districtId.trim();
+    if (typeof subDistrictId === 'string') updates.subDistrictId = subDistrictId.trim();
+    if (typeof blockId === 'string') updates.blockId = blockId.trim();
+    if (typeof localityId === 'string') updates.localityId = localityId.trim();
+    if (typeof pinCode === 'string') updates.pinCode = pinCode.trim();
+    if (typeof residenceAddress === 'string') updates.residenceAddress = residenceAddress.trim().slice(0, 500);
+    if (Object.keys(updates).length === 0) { res.status(400).json({ success: false, message: 'No valid profile fields provided.' }); return; }
+    const updated = await db.updateUserProfile(req.user!.id, updates);
+    res.json({ success: true, message: 'Profile updated successfully.', data: sanitizeAuthUser(updated) });
   } catch (err: any) {
     res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Profile update failed.' : err.message });
   }
 });
 
-// POST /api/auth/reset-password
-// Safe reset workflow: issues a server-side reset signal (no token leakage in production).
-// Actual password change must occur via authenticated, verified admin/recovery flow in deployment.
-router.post('/reset-password', async (req, res: Response): Promise<void> => {
+// DELETE /api/auth/account — account deletion / right to be forgotten (DPDP Act 2023)
+router.delete('/account', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { email } = req.body || {};
-    if (typeof email !== 'string' || !email.trim() || email.length > 254) {
-      res.status(400).json({ success: false, message: 'Email address is required.' });
-      return;
+    const { confirm } = req.body || {};
+    if (confirm !== true) {
+      res.status(400).json({ success: false, message: 'Account deletion requires explicit confirmation.', errors: ['Confirmation required.'] }); return;
     }
-
-    const lookupEmail = email.trim().toLowerCase();
-    const user = db.getUserByEmailWithPassword(lookupEmail) || db.getUserByEmailWithPassword(email.trim());
-    if (!user) {
-      // Avoid user enumeration
-      res.json({
-        success: true,
-        message: 'If an account exists with this email, password reset instructions have been dispatched.'
-      });
-      return;
-    }
-
-    try {
-      db.markCredentialsResetRequired(user.id);
-    } catch {
-      // Do not fail closed for enumeration; audit below records the attempt.
-    }
-
-    db.logAudit({
-      action: 'PASSWORD_RESET_REQUESTED',
-      module: 'auth',
-      userId: user.id,
-      userEmail: user.email,
-      userRole: user.role,
+    const deleted = await db.deleteUser(req.user!.id, req.user!);
+    await db.invalidateUserSessions(req.user!.id);
+    await logIpSecurityEvent({
+      req, eventType: 'LOGOUT', success: true,
+      userId: deleted.id, userEmail: deleted.email, userRole: deleted.role,
+      details: 'Account deleted via Clerk; SCIP record anonymized'
+    });
+    await db.logAudit({
+      action: 'USER_STATUS_UPDATED', module: 'auth',
+      recordId: deleted.id, userId: deleted.id, userEmail: deleted.email, userRole: deleted.role,
       ipAddress: req.ip || '127.0.0.1',
-      details: `Credential reset workflow initiated`
+      details: 'Account deleted via Clerk (right to be forgotten); PII anonymized'
     });
-
-    const meta =
-      process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_DEMO_LOGIN === 'true'
-        ? { devResetHint: 'Development mode: credential reset flag set; use admin recovery or change-password after authentication in an isolated test environment.' }
-        : undefined;
-
-    res.json({
-      success: true,
-      message: 'If an account exists with this email, password reset instructions have been dispatched.',
-      ...(meta ? { meta } : {})
-    });
-  } catch {
-    res.status(500).json({ success: false, message: 'Failed to process request.' });
+    res.json({ success: true, message: 'Account deleted successfully. Your personal data has been anonymized.', redirect: `${process.env.CLERK_LOGOUT_URL || '/sign-in'}` });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Account deletion failed.' : err.message });
   }
 });
 
 export default router;
-
-
-
-
-

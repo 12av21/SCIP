@@ -4,13 +4,28 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes';
+import verificationRoutes from './routes/verificationRoutes';
 import reportRoutes from './routes/reportRoutes';
 import incidentRoutes from './routes/incidentRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
 import adminRoutes from './routes/adminRoutes';
 import miscRoutes from './routes/miscRoutes';
-import { initMongoConnection } from '../database/mongoConnection.js';
-import { validateJwtConfigOnStartup } from './middleware/auth.js';
+import locationRoutes from './routes/locationRoutes';
+import iplogRoutes from './routes/iplogRoutes';
+import geoanalyticsRoutes from './routes/geoanalyticsRoutes';
+import mapRoutes from './routes/mapRoutes';
+import imageRoutes from './routes/imageRoutes';
+import databaseRoutes from './routes/databaseRoutes';
+import indiaCivicRoutes from './routes/indiaCivicRoutes';
+import linkingRoutes from './routes/linkingRoutes';
+import datasetRoutes from './routes/datasetRoutes';
+import reportingRoutes from './routes/reportingRoutes';
+import notificationRoutes from './routes/notificationRoutes';
+import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
+import { tryEnableMongoRuntime } from '../database/index.js';
+import { validateClerkConfigOnStartup } from './middleware/auth.js';
+import { buildCsp } from './csp.js';
+import { logger } from './logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,14 +37,23 @@ export interface CreateAppOptions {
 }
 
 export async function createApp(options: CreateAppOptions = {}) {
-  // Fail closed early in production if JWT config is missing/weak.
-  validateJwtConfigOnStartup();
+  // Fail closed early in production if Clerk config is missing/weak.
+  validateClerkConfigOnStartup();
 
   const app = express();
 
-  // Initialize MongoDB connection lifecycle asynchronously if configured
+  // Trust proxy configuration for production deployments behind reverse proxies/load balancers.
+  // Set SCIP_TRUST_PROXY=true only when behind a trusted proxy (e.g. Nginx, ALB).
+  // When enabled, Express trusts X-Forwarded-* headers for req.ip, req.ips, etc.
+  if (process.env.SCIP_TRUST_PROXY === 'true') {
+    app.set('trust proxy', true);
+  }
+
+  // Initialize MongoDB connection lifecycle asynchronously if configured, then safely
+  // evaluate explicit isolated runtime gates (no split-brain/default cutover).
   if (options.initMongo !== false) {
     await initMongoConnection().catch(() => {});
+    try { tryEnableMongoRuntime(getMongoRuntimeStatus() as any); } catch { /* keep JSON fallback */ }
   }
 
   // Security headers and restrictive defaults
@@ -44,7 +68,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     if (process.env.NODE_ENV === 'production') {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'");
+      res.setHeader('Content-Security-Policy', buildCsp());
     }
     const origin = req.headers.origin;
     if (origin && corsOrigins.includes(origin)) {
@@ -61,31 +85,38 @@ export async function createApp(options: CreateAppOptions = {}) {
     next();
   });
 
-  // Basic in-memory rate limiting (best-effort, single-process; replace with shared store in multi-instance deployments)
+// Distributed-capable rate limiting (in-memory default; shared store opt-in for multi-instance)
+  const { createRateLimitStore, getRateLimitKey } = await import('./rateLimit.js');
+  const rateLimiter = createRateLimitStore();
   const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     if (process.env.DISABLE_RATE_LIMIT === 'true') {
       next();
       return;
     }
     const now = Date.now();
     const windowMs = 60_000;
-    // Opportunistic cleanup to bound memory in long-lived single-process runs.
-    if (rateBuckets.size > 5000) {
-      for (const [k, v] of rateBuckets) {
-        if (now > v.resetAt) rateBuckets.delete(k);
+    const isAuth = req.path.startsWith('/api/auth');
+    const limit = isAuth ? 60 : 300;
+    const key = getRateLimitKey(req);
+    let count: number;
+    try {
+      count = await rateLimiter.increment(key, windowMs);
+    } catch {
+      // Fallback to in-memory on store error
+      if (rateBuckets.size > 5000) {
+        for (const [k, v] of rateBuckets) { if (now > v.resetAt) rateBuckets.delete(k); }
+      }
+      const existing = rateBuckets.get(key);
+      if (!existing || now > existing.resetAt) {
+        rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+        count = 1;
+      } else {
+        existing.count += 1;
+        count = existing.count;
       }
     }
-    const limit = req.path.startsWith('/api/auth') ? 60 : 300;
-    const key = `${req.ip || 'unknown'}:${req.path.startsWith('/api/auth') ? 'auth' : 'api'}`;
-    const bucket = rateBuckets.get(key);
-    if (!bucket || now > bucket.resetAt) {
-      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-    bucket.count += 1;
-    if (bucket.count > limit) {
+    if (count > limit) {
       res.status(429).json({ success: false, message: 'Too many requests. Please try again later.' });
       return;
     }
@@ -97,11 +128,24 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // REST API Routes
   app.use('/api/auth', authRoutes);
+  app.use('/api/verification', verificationRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/incidents', incidentRoutes);
   app.use('/api/intelligence', intelligenceRoutes);
   app.use('/api/admin', adminRoutes);
-  app.use('/api', miscRoutes);
+  // Clerk identity linking (Phase 3.1.3): bootstrap (/api/auth/linking/*) + admin queue (/api/admin/clerk-links/*).
+  app.use('/api', linkingRoutes);
+  app.use('/api/locations', locationRoutes);
+  app.use('/api/iplogs', iplogRoutes);
+  app.use('/api/geoanalytics', geoanalyticsRoutes);
+  app.use('/api/map', mapRoutes);
+  app.use('/api/image', imageRoutes);
+app.use('/api/database', databaseRoutes);
+app.use('/api/india', indiaCivicRoutes);
+app.use('/api/dataset', datasetRoutes);
+app.use('/api/reporting', reportingRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)
   app.use('/api', (req, res) => {
@@ -115,10 +159,13 @@ export async function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  const attachFrontend = options.attachFrontend !== false && process.env.NODE_ENV !== 'test';
+  // Allow serving the production-built frontend (dist/) in test mode for E2E tests
+  // when explicitly requested via SCIP_SERVE_DIST=1.
+  const serveDist = process.env.SCIP_SERVE_DIST === '1';
+  const attachFrontend = options.attachFrontend !== false && (process.env.NODE_ENV !== 'test' || serveDist);
   if (attachFrontend) {
-    // Development: Vite Middleware Mode; Production: Static dist
-    if (process.env.NODE_ENV === 'production') {
+    // Development: Vite Middleware Mode; Production: Static dist; Test+ServeDist: Static dist
+    if (process.env.NODE_ENV === 'production' || serveDist) {
       const distPath = path.resolve(rootDir, 'dist');
       app.use(express.static(distPath));
       app.get('*', (req, res) => {
@@ -154,6 +201,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
 export async function startServer() {
   const app = await createApp();
+  const { closeMongoConnection } = await import('../database/mongoConnection.js');
 
   // Dev server must run on port 3000. Respect --port arg, else fallback to 3000.
   let PORT = 3000;
@@ -165,13 +213,31 @@ export async function startServer() {
     PORT = parseInt(process.env.PORT, 10);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     if (process.env.NODE_ENV === 'production') {
-      console.log(`[SCIP] Server running on port ${PORT}`);
+      logger.info(`[SCIP] Server running on port ${PORT}`);
     } else {
-      console.log(`[SCIP] Smart Community Intelligence Platform server running on http://0.0.0.0:${PORT}`);
+      logger.info(`[SCIP] Smart Community Intelligence Platform server running on http://0.0.0.0:${PORT}`);
     }
   });
 
-  return app;
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (process.env.NODE_ENV !== 'production') {
+      logger.info(`[SCIP] Received ${signal}. Shutting down gracefully...`);
+    }
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Force-resolve in case server.close hangs (e.g. keep-alive); do not exit process here except via caller context.
+      setTimeout(() => resolve(), 5000).unref?.();
+    });
+    await closeMongoConnection().catch(() => {});
+  };
+
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+  return { app, server };
 }
