@@ -53,6 +53,16 @@ export class AIServiceAdapter {
     this.serviceUrl = process.env.AI_SERVICE_URL;
   }
 
+  /** Check if Python AI service is configured and available. */
+  public isServiceEnabled(): boolean {
+    return Boolean(this.serviceUrl);
+  }
+
+  /** Get current service configuration. */
+  public getConfig(): { serviceUrl: string | undefined } {
+    return { serviceUrl: this.serviceUrl };
+  }
+
   // ------------------------------------------------------------------
   // Embedding generation (Python sentence-transformers service)
   // ------------------------------------------------------------------

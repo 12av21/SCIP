@@ -1,0 +1,136 @@
+db.users.deleteMany({});
+db.users.insertMany([
+  {
+    id: 'USR-ADMIN-01',
+    email: 'admin@scip.gov',
+    passwordHash: '$2b$10$JrqMGPu4g.EOJGPRKqW33OZubnvQdPhMShwVnFDmoFQsfqzLEKEDG',
+    role: 'admin',
+    name: 'Adarsh Verma',
+    phone: '+91-98765-43210',
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'USR-AUTH-01',
+    email: 'director@scip.gov',
+    passwordHash: '$2b$10$FiK/MUwQHkifw7JtezXeEOb8ynTI4S.Ett2gO/YxkvGBnXPspbDNa',
+    role: 'authority',
+    name: 'Dr. Rajesh Gupta',
+    phone: '+91-98765-43211',
+    status: 'active',
+    createdAt: '2026-01-05T09:30:00.000Z',
+    updatedAt: '2026-01-05T09:30:00.000Z'
+  },
+  {
+    id: 'USR-ANL-01',
+    email: 'analyst@scip.gov',
+    passwordHash: '$2b$10$Xq9xDohWuth2FbepRQSWQeQ6xAzxb79R68R6zPhYdml4LJlsQ7q.i',
+    role: 'analyst',
+    name: 'Dr. Kavita Rao',
+    phone: '+91-98765-43212',
+    status: 'active',
+    createdAt: '2026-01-12T10:00:00.000Z',
+    updatedAt: '2026-01-12T10:00:00.000Z'
+  },
+  {
+    id: 'USR-DEPT-01',
+    email: 'dept.water@scip.gov',
+    passwordHash: '$2b$10$2B7LC69g03xcfuUObgarhuRhE5ohPiqFGzarmNzIYveLSj2mxMc5m',
+    role: 'dept_officer',
+    name: 'Er. Sunita Patel',
+    phone: '+91-98765-43213',
+    status: 'active',
+    departmentId: 'DEP-WTR',
+    departmentName: 'Water & Sewerage Authority',
+    createdAt: '2026-01-10T11:30:00.000Z',
+    updatedAt: '2026-01-10T11:30:00.000Z'
+  },
+  {
+    id: 'USR-DEPT-02',
+    email: 'dept.roads@scip.gov',
+    passwordHash: '$2b$10$2B7LC69g03xcfuUObgarhuRhE5ohPiqFGzarmNzIYveLSj2mxMc5m',
+    role: 'dept_officer',
+    name: 'Er. Vikram Sharma',
+    phone: '+91-98765-43214',
+    status: 'active',
+    departmentId: 'DEP-ROADS',
+    departmentName: 'Public Works & Roads Infrastructure',
+    createdAt: '2026-01-10T11:35:00.000Z',
+    updatedAt: '2026-01-10T11:35:00.000Z'
+  },
+  {
+    id: 'USR-DEPT-03',
+    email: 'dept.sani@scip.gov',
+    passwordHash: '$2b$10$2B7LC69g03xcfuUObgarhuRhE5ohPiqFGzarmNzIYveLSj2mxMc5m',
+    role: 'dept_officer',
+    name: 'Smt. Anita Roy',
+    phone: '+91-98765-43215',
+    status: 'active',
+    departmentId: 'DEP-SANI',
+    departmentName: 'Municipal Sanitation & Solid Waste',
+    createdAt: '2026-01-10T11:40:00.000Z',
+    updatedAt: '2026-01-10T11:40:00.000Z'
+  },
+  {
+    id: 'USR-DEPT-04',
+    email: 'dept.elec@scip.gov',
+    passwordHash: '$2b$10$2B7LC69g03xcfuUObgarhuRhE5ohPiqFGzarmNzIYveLSj2mxMc5m',
+    role: 'dept_officer',
+    name: 'Er. Devendra Singh',
+    phone: '+91-98765-43216',
+    status: 'active',
+    departmentId: 'DEP-ELEC',
+    departmentName: 'Power, Grid & Public Lighting',
+    createdAt: '2026-01-10T11:45:00.000Z',
+    updatedAt: '2026-01-10T11:45:00.000Z'
+  },
+  {
+    id: 'USR-OFF-01',
+    email: 'officer.water@scip.gov',
+    passwordHash: '$2b$10$tPH9nHID1hLh0Jr9Q.6OGOrZj9CX7v8gDNBFJqCze/FYUZRcxWfl2',
+    role: 'officer',
+    name: 'Officer Arjun Sharma',
+    phone: '+91-98765-43217',
+    status: 'active',
+    departmentId: 'DEP-WTR',
+    departmentName: 'Water & Sewerage Authority',
+    createdAt: '2026-01-11T14:00:00.000Z',
+    updatedAt: '2026-01-11T14:00:00.000Z'
+  },
+  {
+    id: 'USR-OFF-02',
+    email: 'officer.roads@scip.gov',
+    passwordHash: '$2b$10$tPH9nHID1hLh0Jr9Q.6OGOrZj9CX7v8gDNBFJqCze/FYUZRcxWfl2',
+    role: 'officer',
+    name: 'Officer Meera Iyer',
+    phone: '+91-98765-43218',
+    status: 'active',
+    departmentId: 'DEP-ROADS',
+    departmentName: 'Public Works & Roads Infrastructure',
+    createdAt: '2026-01-11T14:05:00.000Z',
+    updatedAt: '2026-01-11T14:05:00.000Z'
+  },
+  {
+    id: 'USR-CIT-01',
+    email: 'citizen.jane@scip.gov',
+    passwordHash: '$2b$10$wd8esv4qP6HVJmmsjZNPsOb6iDHQXp6x8HYmn4D6errIOXDHu5.DG',
+    role: 'citizen',
+    name: 'Priya Sharma',
+    phone: '+91-98765-43220',
+    status: 'active',
+    createdAt: '2026-02-01T14:15:00.000Z',
+    updatedAt: '2026-02-01T14:15:00.000Z'
+  },
+  {
+    id: 'USR-CIT-02',
+    email: 'citizen.rahul@scip.gov',
+    passwordHash: '$2b$10$wd8esv4qP6HVJmmsjZNPsOb6iDHQXp6x8HYmn4D6errIOXDHu5.DG',
+    role: 'citizen',
+    name: 'Rahul Mehta',
+    phone: '+91-98765-43221',
+    status: 'active',
+    createdAt: '2026-02-03T16:00:00.000Z',
+    updatedAt: '2026-02-03T16:00:00.000Z'
+  }
+])

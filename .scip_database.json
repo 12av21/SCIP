@@ -6074,6 +6074,70 @@
   "ipSecurityLogs": [
     {
       "ipAddress": "127.0.0.1",
+      "userId": "USR-CIT-01",
+      "userEmail": "citizen.jane@scip.gov",
+      "userRole": "citizen",
+      "method": "POST",
+      "endpoint": "/api/auth/login",
+      "userAgent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-IN) WindowsPowerShell/5.1.26100.10068",
+      "eventType": "LOGIN_FAILED",
+      "success": false,
+      "details": "Login attempt failed: invalid credentials",
+      "id": "IPL-393424-511",
+      "timestamp": "2026-11-22T03:49:53.424Z",
+      "hash": "c571375843b135456f8e07cd0efabb1ad6a970f30d61e8fef5cb4f72ba7bb3c5",
+      "prevHash": "0595ec16faa6cb1506e63f19df9816690e859d45ebefb0b79655a09501edfe96"
+    },
+    {
+      "ipAddress": "127.0.0.1",
+      "userId": "USR-CIT-01",
+      "userEmail": "citizen.jane@scip.gov",
+      "userRole": "citizen",
+      "method": "POST",
+      "endpoint": "/api/auth/login",
+      "userAgent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-IN) WindowsPowerShell/5.1.26100.10068",
+      "eventType": "LOGIN_FAILED",
+      "success": false,
+      "details": "Login attempt failed: invalid credentials",
+      "id": "IPL-383422-802",
+      "timestamp": "2026-11-22T03:49:43.422Z",
+      "hash": "c39ad1ceb92e18eec251cf8db06d86c159d8f6593408880b42fe513fc8fe4716",
+      "prevHash": "0595ec16faa6cb1506e63f19df9816690e859d45ebefb0b79655a09501edfe96"
+    },
+    {
+      "ipAddress": "127.0.0.1",
+      "userId": "USR-CIT-01",
+      "userEmail": "citizen.jane@scip.gov",
+      "userRole": "citizen",
+      "method": "POST",
+      "endpoint": "/api/auth/login",
+      "userAgent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-IN) WindowsPowerShell/5.1.26100.10068",
+      "eventType": "LOGIN_FAILED",
+      "success": false,
+      "details": "Login attempt failed: invalid credentials",
+      "id": "IPL-371169-839",
+      "timestamp": "2026-11-22T03:49:31.169Z",
+      "hash": "4ffd0f07310136de60e5d0c95a30bec4ab9b4e7f883af93318d09f34af1a3a1a",
+      "prevHash": "0595ec16faa6cb1506e63f19df9816690e859d45ebefb0b79655a09501edfe96"
+    },
+    {
+      "ipAddress": "127.0.0.1",
+      "userId": "UNKNOWN",
+      "userEmail": "citizen1@test.local",
+      "userRole": "citizen",
+      "method": "POST",
+      "endpoint": "/api/auth/login",
+      "userAgent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-IN) WindowsPowerShell/5.1.26100.10068",
+      "eventType": "LOGIN_FAILED",
+      "success": false,
+      "details": "Login attempt failed: account not found or credentials unavailable",
+      "id": "IPL-335669-340",
+      "timestamp": "2026-11-22T03:48:55.669Z",
+      "hash": "60ecf794d930c701e60a231c72ea200ce2b109231f733bb0458548bed5158b06",
+      "prevHash": "0595ec16faa6cb1506e63f19df9816690e859d45ebefb0b79655a09501edfe96"
+    },
+    {
+      "ipAddress": "127.0.0.1",
       "method": "GET",
       "endpoint": "/api/notifications",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
@@ -6969,5 +7033,5 @@
       "updatedAt": "2026-01-01T00:00:00.000Z"
     }
   ],
-  "savedAt": "2026-11-14T05:10:30.725Z"
+  "savedAt": "2026-11-22T03:49:53.424Z"
 }

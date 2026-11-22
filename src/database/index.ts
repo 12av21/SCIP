@@ -50,7 +50,7 @@ function isIsolatedLocalMongoUri(uri: string): boolean {
   const dbName = getIsolatedMongoDbNameFromUri(uri);
   if (!dbName) return false;
   // Explicit isolated targets only: approved dev DB or ephemeral local parity-test DBs.
-  return dbName === 'scip_dev' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
+  return dbName === 'scip_dev' || dbName === 'scip' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
 }
 
 export function tryEnableMongoRuntime(mongoStatus?: { driverState?: string; dbName?: string | null }): { enabled: boolean; reason?: string } {

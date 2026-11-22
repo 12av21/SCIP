@@ -259,6 +259,37 @@ class APIClient {
     return res.data;
   }
 
+  // AI Response Generation
+  public async getCitizenResponse(reportId: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/intelligence/citizen/response/${reportId}`);
+    return res.data;
+  }
+
+  public async getFieldOfficerBriefing(incidentId: string) {
+    const res = await this.request<{ success: boolean; data: any }>(`/api/intelligence/officer/briefing/${incidentId}`);
+    return res.data;
+  }
+
+  public async getDepartmentIntelligence() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/intelligence/dept/intelligence');
+    return res.data;
+  }
+
+  public async getAnalystIntelligence() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/intelligence/analyst/intelligence');
+    return res.data;
+  }
+
+  public async getAuthoritySummary() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/intelligence/authority/summary');
+    return res.data;
+  }
+
+  public async getAdminAIHealth() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/intelligence/admin/ai-health');
+    return res.data;
+  }
+
   // Admin
   public async getUsers() {
     const res = await this.request<{ success: boolean; data: User[] }>('/api/admin/users');

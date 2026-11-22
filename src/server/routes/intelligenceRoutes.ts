@@ -5,7 +5,15 @@ import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
 import { SCIPIntelligenceAgent } from '../../ai/scipAgent.js';
 import { detectIncidentClusters } from '../../ai/incidentClustering.js';
-import { Incident, Report } from '../../types/scip.js';
+import {
+  generateCitizenResponse,
+  generateFieldOfficerBriefing,
+  generateDepartmentOfficerIntelligence,
+  generateAnalystIntelligence,
+  generateAuthoritySummary,
+  generateAdminAIHealth
+} from '../../ai/responseGenerator.js';
+import { Incident, Report, Department, User, SpatioTemporalCluster } from '../../types/scip.js';
 
 const router = Router();
 
@@ -202,3 +210,161 @@ router.get('/export-csv', authenticate, requirePermission('data.export'), async 
 });
 
 export default router;
+
+// ============================================================================
+// AI Response Generation Endpoints
+// ============================================================================
+
+// Citizen: AI-assisted report acknowledgment and guidance
+router.get('/citizen/response/:reportId', authenticate, requirePermission('report.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    const reportId = req.params.reportId;
+    const report = await db.getReportById(reportId);
+    if (!report) {
+      res.status(404).json({ success: false, message: 'Report not found.' });
+      return;
+    }
+    // Authorization: citizens can only see their own reports
+    if (req.user.role === 'citizen' && report.citizenId !== req.user.id) {
+      res.status(403).json({ success: false, message: 'Access denied.' });
+      return;
+    }
+    // Officers/dept_officers can see reports in their department's incidents
+    if ((req.user.role === 'officer' || req.user.role === 'dept_officer') && req.user.departmentId) {
+      const incident = report.incidentId ? await db.getIncidentById(report.incidentId) : null;
+      if (!incident || incident.assignedDepartmentId !== req.user.departmentId) {
+        res.status(403).json({ success: false, message: 'Access denied.' });
+        return;
+      }
+    }
+
+    const incident = report.incidentId ? await db.getIncidentById(report.incidentId) : undefined;
+    const response = generateCitizenResponse(report, incident);
+    res.json({ success: true, data: response });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate citizen response.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+// Field Officer: AI incident briefing with inspection checklist
+router.get('/officer/briefing/:incidentId', authenticate, requirePermission('incident.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    const incidentId = req.params.incidentId;
+    const incident = await db.getIncidentById(incidentId);
+    if (!incident) {
+      res.status(404).json({ success: false, message: 'Incident not found.' });
+      return;
+    }
+    // Authorization: officers can only see incidents assigned to their department
+    if ((req.user.role === 'officer' || req.user.role === 'dept_officer') && req.user.departmentId) {
+      if (incident.assignedDepartmentId !== req.user.departmentId) {
+        res.status(403).json({ success: false, message: 'Access denied.' });
+        return;
+      }
+    }
+
+    const reports = await db.getReports({ incidentId });
+    const briefing = generateFieldOfficerBriefing(incident, reports);
+    res.json({ success: true, data: briefing });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate field officer briefing.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+// Department Officer: Workload intelligence and SLA risk assessment
+router.get('/dept/intelligence', authenticate, requirePermission('incident.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    if (!req.user.departmentId) {
+      res.status(403).json({ success: false, message: 'Department officer role requires department assignment.' });
+      return;
+    }
+    const department = await db.getDepartmentById(req.user.departmentId);
+    if (!department) {
+      res.status(404).json({ success: false, message: 'Department not found.' });
+      return;
+    }
+
+    const allIncidents = await db.getIncidents();
+    const incidents = allIncidents.filter(i => i.assignedDepartmentId === req.user!.departmentId);
+    const reports = await db.getReports();
+    const users = await db.getUsers();
+
+    const intelligence = generateDepartmentOfficerIntelligence(department, incidents, reports, users);
+    res.json({ success: true, data: intelligence });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate department intelligence.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+// Analyst: Incident trends, duplicate patterns, hotspots
+router.get('/analyst/intelligence', authenticate, requirePermission('analytics.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    const incidents = await filterIncidentsForUser(req.user);
+    const reports = await filterReportsForUser(req.user!);
+    const clusters = detectIncidentClusters(reports);
+
+    const intelligence = generateAnalystIntelligence(incidents, reports, clusters);
+    res.json({ success: true, data: intelligence });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate analyst intelligence.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+// Authority: Regional situation summary and cross-department performance
+router.get('/authority/summary', authenticate, requirePermission('intelligence.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    if (req.user.role !== 'authority' && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, message: 'Authority or admin role required.' });
+      return;
+    }
+
+    const incidents = await db.getIncidents();
+    const reports = await db.getReports();
+    const departments = await db.getDepartments();
+    const users = await db.getUsers();
+
+    const summary = generateAuthoritySummary(incidents, reports, departments, users);
+    res.json({ success: true, data: summary });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate authority summary.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+// Admin: AI service health and model configuration
+router.get('/admin/ai-health', authenticate, requirePermission('admin.manage'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required.' });
+      return;
+    }
+    if (req.user.role !== 'admin') {
+      res.status(403).json({ success: false, message: 'Admin role required.' });
+      return;
+    }
+
+    const health = generateAdminAIHealth();
+    res.json({ success: true, data: health });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to generate AI health report.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});

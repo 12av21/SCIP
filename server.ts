@@ -1,4 +1,5 @@
 // Smart Community Intelligence Platform (SCIP) - Full Stack Server Entry
+import 'dotenv/config';
 import { startServer } from './src/server/app.ts';
 
 startServer().catch((err) => {
