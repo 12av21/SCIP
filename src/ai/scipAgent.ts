@@ -2,16 +2,31 @@
 // Orchestrates 10 specialized intelligence tools to transform community observations into structured decision support.
 // Strictly adheres to the Responsible AI principle and transparency standards.
 
-import { Report, Incident, AgentBriefing, AgentToolResult } from '../types/scip';
+import { Report, Incident, AgentBriefing, AgentToolResult, IncidentPriority } from '../types/scip';
 import { classifyReport, extractEntities, determineSeverity } from './classifier';
 import { globalVectorizer } from './tfidf';
 import { findSimilarAndDuplicateReports, calculateHaversineDistance } from './duplicateDetector';
 import { detectIncidentClusters } from './incidentClustering';
 import { computeExplainableRisk } from './riskScorer';
+import { aiAdapter } from './aiServiceAdapter';
+import { isLLMAgentEnabled, runLLMAgent } from './llmAgent';
 
 export interface AgentContext {
   reports: Report[];
   incidents: Incident[];
+}
+
+const UNCERTAINTY_DISCLAIMER =
+  'RESPONSIBLE-AI NOTICE: This intelligence brief is an algorithmic analytical interpretation synthesizing citizen observations. It does not constitute a certified field inspection or final administrative decision. Human officers must verify ground conditions.';
+
+function computeAgentConfidence(toolResults: AgentToolResult[]): number {
+  if (toolResults.length === 0) return 0.3;
+  const score = toolResults.reduce((acc, t) => {
+    if (t.status === 'success') return acc + 1;
+    if (t.status === 'partial') return acc + 0.6;
+    return acc + 0.3;
+  }, 0) / toolResults.length;
+  return Number(Math.max(0.3, Math.min(0.95, score)).toFixed(2));
 }
 
 export class SCIPIntelligenceAgent {
@@ -41,16 +56,23 @@ export class SCIPIntelligenceAgent {
   }
 
   // Tool 2: Entity Extraction Tool
-  public toolEntityExtraction(text: string): AgentToolResult {
+  public async toolEntityExtraction(text: string): Promise<AgentToolResult> {
     const start = performance.now();
-    const entities = extractEntities(text);
+    const nerResult = await aiAdapter.ner(text);
+    const entities = {
+      locations: nerResult.locations,
+      infrastructure: nerResult.infrastructure,
+      hazards: nerResult.hazards,
+      temporal: extractEntities(text).temporal
+    };
     const count = entities.locations.length + entities.infrastructure.length + entities.hazards.length;
     return {
       toolName: 'Entity Extraction Tool',
       status: count > 0 ? 'success' : 'partial',
       executionTimeMs: Number((performance.now() - start).toFixed(2)),
       summary: `Extracted ${entities.locations.length} locations, ${entities.infrastructure.length} infrastructure elements, ${entities.hazards.length} hazard markers`,
-      data: entities
+      data: entities,
+      modelVersion: nerResult.modelVersion
     };
   }
 
@@ -198,7 +220,7 @@ export class SCIPIntelligenceAgent {
   }
 
   // Tool 8: Risk Analysis Tool
-  public toolRiskAnalysis(reportIds: string[]): AgentToolResult {
+  public async toolRiskAnalysis(reportIds: string[]): Promise<AgentToolResult> {
     const start = performance.now();
     const matchingReports = this.reports.filter(r => reportIds.includes(r.id));
     if (matchingReports.length === 0) {
@@ -213,20 +235,53 @@ export class SCIPIntelligenceAgent {
 
     const loc = matchingReports[0].locationName;
     const isHotspot = loc.toLowerCase().includes('sector 4') || loc.toLowerCase().includes('market');
-    const risk = computeExplainableRisk({
-      entityType: 'incident',
-      entityId: `EVAL-${Date.now().toString().slice(-4)}`,
-      reports: matchingReports,
-      locationName: loc,
-      isRecurrentHotspot: isHotspot
-    });
+
+    // Python AI service prioritization when enabled, local TS fallback
+    let riskScoreResult: { score: number; priority: IncidentPriority; explanation: string };
+    if (aiAdapter.isServiceEnabled()) {
+      try {
+        riskScoreResult = await aiAdapter.prioritize({
+          severity: matchingReports[0].urgency,
+          reportCount: matchingReports.length,
+          isHotspot,
+          affectedInfrastructure: false
+        });
+      } catch {
+        const risk = computeExplainableRisk({
+          entityType: 'incident',
+          entityId: `EVAL-${Date.now().toString().slice(-4)}`,
+          reports: matchingReports,
+          locationName: loc,
+          isRecurrentHotspot: isHotspot,
+          declaredUrgency: undefined,
+          inferredUrgencyFromKeywords: undefined
+        });
+        riskScoreResult = { score: risk.score, priority: risk.priority, explanation: risk.explanation };
+      }
+    } else {
+      const risk = computeExplainableRisk({
+        entityType: 'incident',
+        entityId: `EVAL-${Date.now().toString().slice(-4)}`,
+        reports: matchingReports,
+        locationName: loc,
+        isRecurrentHotspot: isHotspot,
+        declaredUrgency: undefined,
+        inferredUrgencyFromKeywords: undefined
+      });
+      riskScoreResult = { score: risk.score, priority: risk.priority, explanation: risk.explanation };
+    }
 
     return {
       toolName: 'Risk Analysis Tool',
       status: 'success',
       executionTimeMs: Number((performance.now() - start).toFixed(2)),
-      summary: `Computed risk score of ${risk.score}/100 (${risk.priority}) across 5 calibrated factors`,
-      data: risk
+      summary: `Computed risk score of ${riskScoreResult.score}/100 (${riskScoreResult.priority})`,
+      data: {
+        score: riskScoreResult.score,
+        priority: riskScoreResult.priority,
+        explanation: riskScoreResult.explanation,
+        factors: []
+      }
     };
   }
 
@@ -336,19 +391,77 @@ export class SCIPIntelligenceAgent {
       query,
       timestamp: new Date().toISOString(),
       executiveSummary: summary,
-      confidence: 0.88,
+      confidence: computeAgentConfidence(toolResults),
       toolResults,
       recommendedActions: actions,
-      uncertaintyDisclaimer:
-        'RESPONSIBLE-AI NOTICE: This intelligence brief is an algorithmic analytical interpretation synthesizing citizen observations. It does not constitute a certified field inspection or final administrative decision. Human officers must verify ground conditions.'
+      uncertaintyDisclaimer: UNCERTAINTY_DISCLAIMER,
+      modelUsed: 'scip-rules-v1'
     };
+  }
+
+  public async executeToolByName(name: string, args: Record<string, any>): Promise<AgentToolResult> {
+    const a = args || {};
+    switch (name) {
+      case 'classification':
+        return this.toolClassification(String(a.text ?? ''), a.declaredCategory);
+      case 'entity_extraction':
+        return await this.toolEntityExtraction(String(a.text ?? ''));
+      case 'similarity':
+        return this.toolSimilarity(String(a.reportId ?? ''), Number(a.limit) > 0 ? Number(a.limit) : 5);
+      case 'duplicate_detection':
+        return this.toolDuplicateDetection(String(a.reportId ?? ''));
+      case 'geospatial_analysis': {
+        const lat = Math.max(-90, Math.min(90, Number(a.lat) || 0));
+        const lng = Math.max(-180, Math.min(180, Number(a.lng) || 0));
+        const radius = Number(a.radiusMeters) > 0 ? Number(a.radiusMeters) : 1000;
+        return this.toolGeospatialAnalysis(lat, lng, radius);
+      }
+      case 'incident_clustering':
+        return this.toolIncidentClustering();
+      case 'trend_analysis':
+        return this.toolTrendAnalysis(typeof a.category === 'string' && a.category.trim() ? a.category : undefined);
+      case 'risk_analysis':
+        return await this.toolRiskAnalysis(Array.isArray(a.reportIds) ? a.reportIds.map(String) : []);
+      case 'evidence_retrieval':
+        return this.toolEvidenceRetrieval(String(a.incidentOrClusterId ?? ''));
+      default:
+        return {
+          toolName: name,
+          status: 'insufficient_evidence',
+          executionTimeMs: 0,
+          summary: `Unknown tool requested: ${name}`,
+          data: null
+        };
+    }
   }
 
   /**
    * Main Agent Execution Pipeline: Receives a query or intent, selects tools, executes them,
    * and compiles the final intelligence synthesis.
    */
-  public executeIntelligenceQuery(query: string, specificTool?: string): AgentBriefing {
+  public async executeIntelligenceQuery(query: string, specificTool?: string): Promise<AgentBriefing> {
+    if (!specificTool && isLLMAgentEnabled()) {
+      try {
+        const llm = await runLLMAgent({ query, executeTool: (name, args) => this.executeToolByName(name, args) });
+        const actions = llm.recommendedActions.length > 0
+          ? llm.recommendedActions
+          : ['Require designated authority officer review prior to municipal work order creation.'];
+        return {
+          id: `BRIEF-${Date.now().toString().slice(-6)}`,
+          query,
+          timestamp: new Date().toISOString(),
+          executiveSummary: llm.summary,
+          confidence: computeAgentConfidence(llm.toolResults),
+          toolResults: llm.toolResults,
+          recommendedActions: actions,
+          uncertaintyDisclaimer: UNCERTAINTY_DISCLAIMER,
+          modelUsed: llm.model
+        };
+      } catch {
+        // LLM unavailable or failed: fall through to the deterministic rules-based agent.
+      }
+    }
+
     const qLower = query.toLowerCase();
     const toolResults: AgentToolResult[] = [];
 
@@ -364,7 +477,7 @@ export class SCIPIntelligenceAgent {
           toolResults.push(this.toolGeospatialAnalysis(28.6139, 77.2090, 800));
           break;
         case 'entities':
-          toolResults.push(this.toolEntityExtraction(query));
+          toolResults.push(await this.toolEntityExtraction(query));
           break;
       }
     } else {
@@ -379,7 +492,7 @@ export class SCIPIntelligenceAgent {
 
       if (qLower.includes('risk') || qLower.includes('priority') || qLower.includes('hazard') || qLower.includes('attention')) {
         const topRepIds = this.reports.slice(0, 3).map(r => r.id);
-        toolResults.push(this.toolRiskAnalysis(topRepIds));
+        toolResults.push(await this.toolRiskAnalysis(topRepIds));
       }
 
       if (qLower.includes('trend') || qLower.includes('recurrence') || qLower.includes('frequency') || qLower.includes('stat') || qLower.includes('problem') || qLower.includes('status')) {
@@ -387,7 +500,7 @@ export class SCIPIntelligenceAgent {
       }
 
       if (qLower.includes('entity') || qLower.includes('extract') || qLower.length > 20) {
-        toolResults.push(this.toolEntityExtraction(query));
+        toolResults.push(await this.toolEntityExtraction(query));
       }
 
       // Default fallback if no specific tool was selected

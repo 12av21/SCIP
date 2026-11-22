@@ -8,7 +8,9 @@ import type {
   User, UserRole, Department, Report, AIAnalysis, Incident, SpatioTemporalCluster,
   Notification, Feedback, AuditLog, InspectionRecord, ModelEvaluationMetrics,
   AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality,
-  AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel
+  AdministrativeBoundary, IPSecurityLog, AuthEventType, LocationLevel,
+  ClerkIdentityLink, ClerkLinkVerificationMethod,
+  NotificationTemplate, NotificationPreference, NotificationEventType, NotificationChannel, NotificationPriority, NotificationFilters, NotificationStats
 } from '../types/scip.js';
 
 export interface IScipRepository {
@@ -27,6 +29,9 @@ export interface IScipRepository {
   getUsers(): Promise<User[]> | User[];
   getUserById(id: string): Promise<User | undefined> | User | undefined;
   getUserByEmailWithPassword(email: string): Promise<User | undefined> | User | undefined;
+  getUserByClerkId(clerkUserId: string): Promise<User | undefined> | User | undefined;
+  findUsersByDepartment(departmentId: string): Promise<User[]> | User[];
+  findUsersByRole(role: UserRole): Promise<User[]> | User[];
   createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> | User;
   updateUserRole(userId: string, newRole: UserRole, adminUser: User): Promise<User> | User;
   updateUserStatus(userId: string, status: 'active' | 'suspended', adminUser: User): Promise<User> | User;
@@ -35,6 +40,33 @@ export interface IScipRepository {
   changeUserPassword(userId: string, newPasswordHash: string): Promise<void> | void;
   updateUserProfile(userId: string, updates: { name?: string; phone?: string }): Promise<User> | User;
   deleteUser(userId: string, requestingUser: User): Promise<User> | User;
+
+  // clerk identity linking (Phase 3.1.3)
+  linkClerkIdentity(scipUserId: string, clerkSubject: string): Promise<{ linked: boolean; reason?: string }> | { linked: boolean; reason?: string };
+  createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }): Promise<ClerkIdentityLink> | ClerkIdentityLink;
+
+  /**
+   * Secure citizen onboarding for a verified Clerk identity that has no existing
+   * SCIP account. Creates exactly one new citizen profile, links the Clerk
+   * subject, and never escalates role. Caller (route) must enforce that the
+   * Clerk identity is verified and that no existing SCIP account already matches.
+   */
+  createClerkCitizen(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    clerkSubject: string;
+    residenceAddress?: string;
+  }): Promise<User> | User;
+  getClerkLinkById(id: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
+  getClerkLinkBySubject(clerkSubject: string): Promise<ClerkIdentityLink | undefined> | ClerkIdentityLink | undefined;
+  getClerkLinksByScipUser(scipUserId: string): Promise<ClerkIdentityLink[]> | ClerkIdentityLink[];
+  listPendingClerkLinks(): Promise<ClerkIdentityLink[]> | ClerkIdentityLink[];
+  setClerkLinkChallenge(id: string, challengeHash: string, challengeSalt: string, expiresAt: string, resendCooldownUntil: string): Promise<void> | void;
+  submitClerkLinkChallenge(id: string, otp: string): Promise<{ verified: boolean; linked: boolean; reason?: string }> | { verified: boolean; linked: boolean; reason?: string };
+  decideClerkLink(id: string, decision: 'approve' | 'reject', adminUser: User, reason: string): Promise<{ linked: boolean; reason?: string }> | { linked: boolean; reason?: string };
+  cancelClerkLink(id: string, clerkSubject: string): Promise<void> | void;
+  expireStaleClerkLinks(): Promise<number> | number;
 
   // departments
   getDepartments(): Promise<Department[]> | Department[];
@@ -56,12 +88,31 @@ export interface IScipRepository {
   createIncidentFromCluster(cluster: SpatioTemporalCluster, creatorUser: User): Promise<Incident> | Incident;
   reviewIncident(incidentId: string, action: 'confirm' | 'dismiss', reviewer: User, notes?: string, deptId?: string, officerId?: string): Promise<Incident> | Incident;
   resolveIncident(incidentId: string, resolver: User, payload: { actionTaken: string; preventiveMeasures?: string; costEstimate?: number }): Promise<Incident> | Incident;
+  closeIncident(incidentId: string, closer: User, notes?: string): Promise<Incident> | Incident;
+  reopenIncident(incidentId: string, reopener: User, reason: string): Promise<Incident> | Incident;
+  verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string): Promise<Incident> | Incident;
 
   // notifications/feedback
   getNotificationsForUser(userId: string): Promise<Notification[]> | Notification[];
   createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>): Promise<Notification> | Notification;
   markNotificationAsRead(notifId: string, userId: string): Promise<void> | void;
   markAllNotificationsAsRead(userId: string): Promise<void> | void;
+  // Enhanced notification methods
+  findNotificationById(id: string): Promise<Notification | undefined> | Notification | undefined;
+  updateNotification(id: string, notification: Notification): Promise<Notification> | Notification;
+  deleteNotification(id: string): Promise<boolean> | boolean;
+  findNotificationsByUser(userId: string, filters?: NotificationFilters): Promise<Notification[]> | Notification[];
+  getNotificationStats(userId: string): Promise<NotificationStats> | NotificationStats;
+  // Notification preferences
+  findNotificationPreferencesByUserId(userId: string): Promise<NotificationPreference | undefined> | NotificationPreference | undefined;
+  upsertNotificationPreferences(prefs: NotificationPreference): Promise<NotificationPreference> | NotificationPreference;
+  // Notification templates
+  findAllNotificationTemplates(): Promise<NotificationTemplate[]> | NotificationTemplate[];
+  findNotificationTemplateById(id: string): Promise<NotificationTemplate | undefined> | NotificationTemplate | undefined;
+  findNotificationTemplateByEventType(eventType: NotificationEventType): Promise<NotificationTemplate | undefined> | NotificationTemplate | undefined;
+  createNotificationTemplate(template: NotificationTemplate): Promise<NotificationTemplate> | NotificationTemplate;
+  updateNotificationTemplate(id: string, template: NotificationTemplate): Promise<NotificationTemplate> | NotificationTemplate;
+  deleteNotificationTemplate(id: string): Promise<boolean> | boolean;
   submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> | Feedback;
   getFeedbacks(): Promise<Feedback[]> | Feedback[];
 
@@ -158,4 +209,14 @@ export interface IScipRepository {
   listBackups(backupDir?: string): { file: string; name: string; size: number; savedAt: string | null; recordCount: number }[] | Promise<{ file: string; name: string; size: number; savedAt: string | null; recordCount: number }[]>;
   pruneBackups(retentionCount: number, backupDir?: string): { pruned: number; remaining: number } | Promise<{ pruned: number; remaining: number }>;
   restoreFromBackup(backupFile: string, storageFile?: string): SCIPDatabase | Promise<SCIPDatabase>;
+
+  // --- Email & SMS Verification ---
+  setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string): Promise<void> | void;
+  setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string): Promise<void> | void;
+  verifyUserEmail(userId: string, token: string): Promise<boolean> | boolean;
+  verifyUserPhone(userId: string, otp: string): Promise<boolean> | boolean;
+  getUserVerificationStatus(userId: string): Promise<{ emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined> | { emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined;
+  incrementVerificationAttempts(userId: string): Promise<void> | void;
+  resetVerificationAttempts(userId: string): Promise<void> | void;
+  updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }): Promise<void> | void;
 }

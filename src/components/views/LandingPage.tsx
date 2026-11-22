@@ -2,8 +2,8 @@
 // Inspired by the information architecture, visual hierarchy and usability of MyGov.in
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { api } from '../../services/apiClient';
-import { Report, Incident, Department, User } from '../../types/scip';
 import {
   FileText,
   Search,
@@ -42,48 +42,55 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSelectReportId
 }) => {
   const { isAuthenticated, role } = useAuth();
+  const { language } = useLanguage();
 
-  // Real Database Data State
-  const [reports, setReports] = useState<Report[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [trends, setTrends] = useState<any>(null);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isError, setIsError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  // Public stats state
+  const [publicStats, setPublicStats] = useState<{
+    registeredCitizens: number;
+    totalReports: number;
+    pendingReports: number;
+    underReviewReports: number;
+    resolvedReports: number;
+    activeIncidents: number;
+    resolutionRate: number;
+    categoryCounts: Record<string, number>;
+    dailyVolume: Record<string, number>;
+    incidentStatusCounts: Record<string, number>;
+  } | null>(null);
+  const [latestActivities, setLatestActivities] = useState<Array<{
+    id: string;
+    title: string;
+    category: string;
+    date: string;
+    type: 'incident' | 'report';
+    status: string;
+    location: string;
+    summary: string;
+  }>>([]);
 
   // Quick Tracker input state
   const [trackingInput, setTrackingInput] = useState('');
 
   useEffect(() => {
-    loadPortalData();
+    loadPublicStats();
+    loadLatestActivities();
   }, []);
 
-  const loadPortalData = async () => {
-    setIsLoading(true);
-    setIsError(false);
-    setErrorMessage('');
+  const loadPublicStats = async () => {
     try {
-      const [repData, incData, deptData, userData, trendData] = await Promise.all([
-        api.getReports().catch(() => []),
-        api.getIncidents().catch(() => []),
-        api.getDepartments().catch(() => []),
-        api.getUsers().catch(() => []),
-        api.getTrends().catch(() => null)
-      ]);
+      const stats = await api.getPublicStats();
+      if (stats) setPublicStats(stats);
+    } catch (err) {
+      console.error('Failed to load public stats:', err);
+    }
+  };
 
-      setReports(repData || []);
-      setIncidents(incData || []);
-      setDepartments(deptData || []);
-      setUsers(userData || []);
-      setTrends(trendData);
-    } catch (err: any) {
-      setIsError(true);
-      setErrorMessage(err.message || 'Failed to connect to municipal database.');
-    } finally {
-      setIsLoading(false);
+  const loadLatestActivities = async () => {
+    try {
+      const activities = await api.getPublicLatest();
+      if (activities) setLatestActivities(activities);
+    } catch (err) {
+      console.error('Failed to load latest activities:', err);
     }
   };
 
@@ -92,41 +99,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     if (!trackingInput.trim()) return;
     onNavigate('track-report');
   };
-
-  // Metrics derived strictly from real database records
-  const totalReports = reports.length;
-  const pendingReports = reports.filter(r => r.status === 'submitted' || r.status === 'analyzed').length;
-  const underReviewReports = reports.filter(r => r.status === 'under_review' || r.status === 'linked' || r.status === 'assigned').length;
-  const resolvedReports = reports.filter(r => r.status === 'resolved').length;
-  const activeIncidents = incidents.filter(i => i.status === 'confirmed' || i.status === 'in_progress').length;
-  const registeredCitizens = users.filter(u => u.role === 'citizen').length || users.length;
-  const resolutionRate = totalReports > 0 ? Math.round((resolvedReports / totalReports) * 100) : 0;
-
-  // Real latest community activities from database
-  const latestActivities = [
-    ...incidents.map(inc => ({
-      id: inc.id,
-      title: inc.title,
-      category: inc.category,
-      date: inc.createdAt,
-      type: 'incident' as const,
-      status: inc.status,
-      location: inc.locationName,
-      summary: inc.description
-    })),
-    ...reports.map(rep => ({
-      id: rep.id,
-      title: rep.title,
-      category: rep.category,
-      date: rep.createdAt,
-      type: 'report' as const,
-      status: rep.status,
-      location: rep.locationName,
-      summary: rep.description
-    }))
-  ]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 4);
 
   return (
     <div className="space-y-12 py-2 text-[#253443]">
@@ -196,7 +168,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 type="text"
                 value={trackingInput}
                 onChange={e => setTrackingInput(e.target.value)}
-                placeholder="e.g. REP-2026-001"
+                placeholder="Enter Reference Number"
                 className="w-full px-3 py-2 text-xs font-mono uppercase bg-white border border-[#DCE3EA] rounded-md text-[#153E63] font-semibold focus:border-[#1F5F91] focus:outline-hidden"
               />
               <button
@@ -209,7 +181,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
             <div className="pt-2 border-t border-[#DCE3EA] flex items-center justify-between text-[11px] text-[#657586]">
               <span>Toll Free Civic Line:</span>
-              <strong className="text-[#E89B36]">1912 (24x7)</strong>
+              <strong className="text-[#657586]">Use configured helpdesk</strong>
             </div>
           </div>
         </div>
@@ -234,132 +206,218 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           {/* Card 1 */}
           <div
             onClick={() => onNavigate('submit-report')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <PlusCircle className="w-5 h-5 text-[#153E63] group-hover:text-[#1F5F91]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/submit-community-report.webp"
+                alt="Damaged urban road with cracks and potholes representing civic infrastructure issues"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <PlusCircle className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                1. Submit Community Report
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Log road damage, water stagnation, power line hazards, or public sanitation issues with GPS coordinates.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>Submit Report</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  1. Submit Community Report
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Log road damage, water stagnation, power line hazards, or public sanitation issues with GPS coordinates.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>Submit Report</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
 
           {/* Card 2 */}
           <div
             onClick={() => onNavigate('track-report')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <Search className="w-5 h-5 text-[#153E63] group-hover:text-[#1F5F91]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/track-report.webp"
+                alt="Person using a smartphone to check service or complaint status"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <Search className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                2. Track a Report
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Check live stage progression, officer accountability notes, and estimated resolution timelines.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>Track Grievance</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  2. Track a Report
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Check live stage progression, officer accountability notes, and estimated resolution timelines.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>Track Grievance</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
 
           {/* Card 3 */}
           <div
             onClick={() => onNavigate('incidents')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <AlertTriangle className="w-5 h-5 text-[#E89B36]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/community-issues-incidents.webp"
+                alt="Urban street affected by flooding and waterlogging illustrating public hazards"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/10 to-transparent" />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <AlertTriangle className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                3. View Community Issues & Incidents
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Inspect synthesized spatio-temporal incident clusters verified by municipal human officers.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>Inspect Incidents</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  3. View Community Issues & Incidents
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Inspect synthesized spatio-temporal incident clusters verified by municipal human officers.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>Inspect Incidents</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
 
           {/* Card 4 */}
           <div
             onClick={() => onNavigate('departments')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <Building2 className="w-5 h-5 text-[#153E63] group-hover:text-[#1F5F91]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/municipal-department-directory.webp"
+                alt="Modern civic administration building exterior representing municipal services"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <Building2 className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                4. Municipal Department Directory
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Connect with departmental heads for Water Supply, Roads (PWD), Electrical Grid, and Public Sanitation.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>View Directory</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  4. Municipal Department Directory
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Connect with departmental heads for Water Supply, Roads (PWD), Electrical Grid, and Public Sanitation.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>View Directory</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
 
           {/* Card 5 */}
           <div
             onClick={() => onNavigate('map')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <MapPin className="w-5 h-5 text-[#28834A]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/geospatial-intelligence-map.webp"
+                alt="Tablet displaying 3D mapping and geospatial data for digital intelligence"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/10 to-transparent" />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <MapPin className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                5. Geospatial Intelligence Map
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Interactive district map displaying ground report coordinates, cluster radii, and hotspot density contours.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>Open Map</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  5. Geospatial Intelligence Map
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Interactive district map displaying ground report coordinates, cluster radii, and hotspot density contours.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>Open Map</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
 
           {/* Card 6 */}
           <div
             onClick={() => onNavigate('trends')}
-            className="p-5 bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all cursor-pointer group space-y-3"
+            className="bg-white rounded-xl border border-[#DCE3EA] hover:border-[#1F5F91] hover:shadow-xs transition-all duration-300 cursor-pointer group overflow-hidden"
           >
-            <div className="w-10 h-10 rounded-lg bg-[#EAF2F8] text-[#1F5F91] flex items-center justify-center font-bold">
-              <TrendingUp className="w-5 h-5 text-[#153E63] group-hover:text-[#1F5F91]" />
+            <div className="relative aspect-video w-full overflow-hidden bg-[#EAF2F8]">
+              <img
+                src="/assets/home/community-intelligence-trends.webp"
+                alt="Data visualization charts on a tablet representing analytics and planning insights"
+                width={960}
+                height={540}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[#1F5F91]">
+                <TrendingUp className="w-8 h-8 opacity-40" />
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91]">
-                6. Community Intelligence & Trends
-              </h3>
-              <p className="text-xs text-[#657586] mt-1 leading-relaxed">
-                Multi-factor risk analysis, recurrence indicators, and category volumes for civic planning.
-              </p>
-            </div>
-            <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
-              <span>View Analytics</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+            <div className="p-5 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-[#153E63] group-hover:text-[#1F5F91] transition-colors duration-300">
+                  6. Community Intelligence & Trends
+                </h3>
+                <p className="text-xs text-[#657586] mt-1 leading-relaxed">
+                  Multi-factor risk analysis, recurrence indicators, and category volumes for civic planning.
+                </p>
+              </div>
+              <div className="pt-2 text-xs font-semibold text-[#1F5F91] flex items-center gap-1">
+                <span>View Analytics</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform duration-300" />
+              </div>
             </div>
           </div>
         </div>
@@ -388,17 +446,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
 
         {/* Error State if database fails */}
-        {isError && (
+        {publicStats === null && latestActivities.length === 0 && (
           <div className="bg-[#FEF2F2] border border-[#FCA5A5] text-[#991B1B] p-4 rounded-lg text-xs flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-[#B42318]" />
-              <span>{errorMessage}</span>
+              <span>{language === 'HI' ? 'डेटा लोड करने में विफल' : 'Failed to load data from municipal database'}</span>
             </div>
             <button
-              onClick={loadPortalData}
+              onClick={() => { loadPublicStats(); loadLatestActivities(); }}
               className="px-3 py-1 bg-white border border-[#FCA5A5] rounded text-[11px] font-semibold"
             >
-              Retry Database Sync
+              {language === 'HI' ? 'पुनः प्रयास करें' : 'Retry Database Sync'}
             </button>
           </div>
         )}
@@ -410,7 +468,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Registered Citizens
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : registeredCitizens}
+              {publicStats ? publicStats.registeredCitizens : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Active user accounts</div>
           </div>
@@ -421,7 +479,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Total Reports
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : totalReports}
+              {publicStats ? publicStats.totalReports : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Logged ground observations</div>
           </div>
@@ -432,7 +490,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Under Review
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#E89B36] font-mono tabular-nums">
-              {isLoading ? '...' : underReviewReports + pendingReports}
+              {publicStats ? publicStats.underReviewReports + publicStats.pendingReports : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Under active investigation</div>
           </div>
@@ -443,7 +501,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Resolved Reports
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#28834A] font-mono tabular-nums">
-              {isLoading ? '...' : resolvedReports}
+              {publicStats ? publicStats.resolvedReports : '...'}
             </div>
             <div className="text-[10px] text-[#28834A] font-semibold">Remediated & verified</div>
           </div>
@@ -454,7 +512,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Active Incidents
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#1F5F91] font-mono tabular-nums">
-              {isLoading ? '...' : activeIncidents}
+              {publicStats ? publicStats.activeIncidents : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Confirmed work orders</div>
           </div>
@@ -465,7 +523,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Resolution Rate
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : `${resolutionRate}%`}
+              {publicStats ? `${publicStats.resolutionRate}%` : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Cumulative closure ratio</div>
           </div>

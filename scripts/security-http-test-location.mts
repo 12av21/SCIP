@@ -6,7 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
-import jwt from 'jsonwebtoken';
+import { register } from 'node:module';
+
+// Redirect @clerk/backend to a test shim (this test process only).
+register('./test-support/clerk-test-loader.mjs', import.meta.url);
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-http-location-'));
 const tmpDb = path.join(tmpDir, 'scip_test_db.json');
@@ -18,7 +21,11 @@ process.env.DISABLE_HMR = 'true';
 
 const { createApp } = await import('../src/server/app.js');
 const { db, getDatabaseRuntimeInfo } = await import('../src/database/index.js');
-const { getJwtSecret } = await import('../src/server/middleware/auth.js');
+
+// Link every seed user to a deterministic test Clerk identity in the temp DB.
+for (const u of await db.getUsers()) {
+  if (!(u as any).clerkUserId) { await db.linkClerkIdentity(u.id, `clerk:${u.id}`); }
+}
 
 let passed = 0; let failed = 0;
 const results: string[] = [];
@@ -28,7 +35,7 @@ function ok(name: string, cond: boolean, detail = '') {
 }
 
 function tokenFor(u: any) {
-  return jwt.sign({ id: u.id, email: u.email, role: u.role, sv: u.sessionVersion ?? 0 }, getJwtSecret(), { expiresIn: '1h' });
+  return u.clerkUserId ?? `clerk:${u.id}`;
 }
 
 async function req(port: number, method: string, p: string, body?: any, token?: string) {
@@ -257,6 +264,7 @@ const outsideOfficer = await db.createUser({
   sessionVersion: 0,
   credentialsResetRequired: false
 }, admin) as any;
+if (!(outsideOfficer as any).clerkUserId) { await db.linkClerkIdentity(outsideOfficer.id, `clerk:${outsideOfficer.id}`); }
 // No jurisdiction set -> should fail assignment
 
 const inc2 = await db.createIncidentFromCluster({

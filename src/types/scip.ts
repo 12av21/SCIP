@@ -4,7 +4,8 @@ export type UserRole =
   | 'dept_officer'
   | 'analyst'
   | 'authority'
-  | 'admin';
+  | 'admin'
+  | 'system';
 
 export type UserPermission =
   | 'user.read'
@@ -32,6 +33,8 @@ export type UserPermission =
   | 'model.evaluate'
   | 'data.export'
   | 'admin.manage'
+  | 'notification.send'
+  | 'notification.manage'
   // India location & geospatial permissions
   | 'location.read'
   | 'location.manage'
@@ -47,6 +50,7 @@ export type UserPermission =
 
 export interface User {
   id: string;
+  clerkUserId?: string;
   name: string;
   email: string;
   passwordHash?: string;
@@ -54,9 +58,18 @@ export interface User {
   departmentId?: string;
   departmentName?: string;
   phone?: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'unverified';
   sessionVersion?: number;
   credentialsResetRequired?: boolean;
+  // Verification status
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  emailVerificationTokenHash?: string;    // hashed token, never plaintext
+  emailVerificationTokenExpiresAt?: string;
+  phoneVerificationOtpHash?: string;      // hashed OTP, never plaintext
+  phoneVerificationOtpExpiresAt?: string;
+  verificationAttempts: number;            // failed verification attempts
+  lastVerificationSentAt?: string;         // timestamp of last OTP/token sent
   // Residence location (separate from complaint locations)
   stateId?: string;
   districtId?: string;
@@ -73,6 +86,44 @@ export interface User {
   jurisdictionLocalityIds?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ============================================================================
+// Clerk Identity Linking (Phase 3.1.3)
+// ============================================================================
+
+export type ClerkLinkStatus =
+  | 'NOT_LINKED'
+  | 'PENDING_VERIFICATION'
+  | 'VERIFIED'
+  | 'LINKED'
+  | 'EXPIRED'
+  | 'REJECTED'
+  | 'REVOKED';
+
+export type ClerkLinkVerificationMethod = 'ADMIN_APPROVED' | 'ONE_TIME_CHALLENGE';
+
+export interface ClerkIdentityLink {
+  id: string;
+  scipUserId: string;
+  clerkSubject: string;
+  status: ClerkLinkStatus;
+  verificationMethod: ClerkLinkVerificationMethod;
+  challengeHash?: string;
+  challengeSalt?: string;
+  challengeExpiresAt?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  resendCooldownUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+  verifiedAt?: string;
+  linkedAt?: string;
+  expiresAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  reason?: string;
+  correlationId: string;
 }
 
 export interface Department {
@@ -152,6 +203,7 @@ export interface SimilarReportMatch {
   timeDeltaHours: number;
   matchingTerms: string[];
   isPotentialDuplicate: boolean;
+  duplicateScore: number; // 0 to 1, same unified score used for the duplicate decision
 }
 
 export interface AIAnalysis {
@@ -439,8 +491,64 @@ export interface DatasetQualityMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Semantic Intelligence & AI Evaluation Types (Phase 2.3)
+// Metrics for semantic similarity, cross-language evaluation, duplicate
+// detection, and entity extraction. All computed with local TF-IDF / rule-based
+// engines — no sentence-transformers or trained ML models required.
+// ---------------------------------------------------------------------------
+
+export interface SemanticPairResult {
+  textA: string;
+  textB: string;
+  similarity: number; // 0 to 1
+  modelId: string;
+  languageMatch: boolean; // true if both texts use the same script family
+}
+
+export interface SemanticClusteringResult {
+  totalReports: number;
+  clusterCount: number;
+  averageSilhouette: number; // -1 to 1, higher = better separated clusters
+  intraClusterSimilarity: number; // average similarity within clusters
+  interClusterSimilarity: number; // average similarity between clusters
+  clusterSizeDistribution: number[]; // sizes of each cluster
+}
+
+export interface DuplicateDetectionEvaluation {
+  totalEvaluated: number;
+  truePositives: number;   // correctly identified duplicates
+  falsePositives: number;  // non-duplicates flagged as duplicates
+  falseNegatives: number;  // duplicates missed
+  precision: number;       // 0 to 1
+  recall: number;          // 0 to 1
+  f1Score: number;         // 0 to 1
+  threshold: number;       // decision threshold used
+}
+
+export interface EntityExtractionEvaluation {
+  totalEvaluated: number;
+  truePositives: number;   // correctly extracted entities
+  falsePositives: number;  // spurious entities
+  falseNegatives: number;  // missed entities
+  precision: number;       // 0 to 1
+  recall: number;          // 0 to 1
+  f1Score: number;         // 0 to 1
+  byType: Record<'locations' | 'infrastructure' | 'hazards', { precision: number; recall: number; f1: number }>;
+}
+
+export interface SemanticEvaluationResult {
+  evaluatedAt: string;
+  semanticPair: SemanticPairResult | null;
+  crossLanguagePairs: SemanticPairResult[];
+  semanticClustering: SemanticClusteringResult;
+  duplicateDetection: DuplicateDetectionEvaluation;
+  entityExtraction: EntityExtractionEvaluation;
+  overallScore: number; // 0 to 100, weighted composite
+  limitations: string[]; // honest limitations of the evaluation
+}
+
+// ---------------------------------------------------------------------------
 // Image Intelligence Types (Phase 4)
-// Metadata, analysis, and upload results for civic report evidence photos.
 // ---------------------------------------------------------------------------
 
 export type ImageSource = 'upload' | 'url' | 'camera';
@@ -504,15 +612,133 @@ export interface Resolution {
   resolvedAt: string;
 }
 
+export type NotificationChannel = 'email' | 'sms' | 'in_app' | 'push';
+
+export type NotificationEventType =
+  | 'incident_created'
+  | 'incident_assigned'
+  | 'incident_updated'
+  | 'incident_closed'
+  | 'incident_reopened'
+  | 'incident_verified'
+  | 'incident_escalated'
+  | 'incident_sla_breach'
+  | 'report_submitted'
+  | 'report_status_changed'
+  | 'report_assigned'
+  | 'report_resolved'
+  | 'report_acknowledged'
+  | 'report_generated'
+  | 'report_scheduled'
+  | 'user_registered'
+  | 'user_role_changed'
+  | 'system_announcement'
+  | 'ai_insight_generated'
+  | 'department_alert';
+
+export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
+
 export interface Notification {
   id: string;
   userId: string;
+  eventType: NotificationEventType;
   title: string;
   message: string;
-  type: 'report_status' | 'incident_alert' | 'assignment' | 'resolution' | 'system';
+  channels: NotificationChannel[];
+  priority: NotificationPriority;
+  data?: Record<string, any>;
   read: boolean;
-  link?: string;
+  readAt?: string;
+  emailSent?: boolean;
+  emailSentAt?: string;
+  smsSent?: boolean;
+  smsSentAt?: string;
+  pushSent?: boolean;
+  pushSentAt?: string;
+  correlationId?: string;
+  relatedEntityId?: string;
+  relatedEntityType?: 'incident' | 'report' | 'user' | 'template' | 'department';
   createdAt: string;
+}
+
+export interface NotificationTemplate {
+  id: string;
+  eventType: NotificationEventType;
+  name: string;
+  description: string;
+  channels: NotificationChannel[];
+  subject: string;
+  emailTemplate: string;
+  smsTemplate: string;
+  inAppTemplate: string;
+  priority: NotificationPriority;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationPreference {
+  userId: string;
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  inAppEnabled: boolean;
+  pushEnabled: boolean;
+  channelPreferences: Record<NotificationEventType, NotificationChannel[]>;
+  quietHours?: {
+    enabled: boolean;
+    start: string;
+    end: string;
+    timezone: string;
+  };
+  frequency?: 'immediate' | 'hourly_digest' | 'daily_digest';
+  updatedAt: string;
+}
+
+export interface NotificationFilters {
+  userId?: string;
+  eventType?: NotificationEventType;
+  channels?: NotificationChannel[];
+  priority?: NotificationPriority;
+  read?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+  relatedEntityId?: string;
+  relatedEntityType?: 'incident' | 'report' | 'user' | 'template' | 'department';
+  limit?: number;
+  offset?: number;
+}
+
+export interface NotificationStats {
+  total: number;
+  unread: number;
+  byType: Record<NotificationEventType, number>;
+  byChannel: Record<NotificationChannel, number>;
+  byPriority: Record<NotificationPriority, number>;
+}
+
+export interface NotificationSendRequest {
+  userId: string;
+  eventType: NotificationEventType;
+  title: string;
+  message: string;
+  channels?: NotificationChannel[];
+  priority?: NotificationPriority;
+  data?: Record<string, any>;
+  correlationId?: string;
+  relatedEntityId?: string;
+  relatedEntityType?: 'incident' | 'report' | 'user' | 'template' | 'department';
+}
+
+export interface NotificationSendResult {
+  success: boolean;
+  notificationId: string;
+  channels: {
+    email?: { success: boolean; messageId?: string; error?: string };
+    sms?: { success: boolean; messageId?: string; error?: string };
+    inApp?: { success: boolean; error?: string };
+    push?: { success: boolean; error?: string };
+  };
+  errors: string[];
 }
 
 export interface Feedback {
@@ -663,7 +889,7 @@ export interface AdministrativeBoundary {
 // Complaint location (distinct from residence location)
 // ---------------------------------------------------------------------------
 
-export type LocationSource = 'gps' | 'manual_map' | 'geocoded' | 'preset';
+export type LocationSource = 'gps' | 'manual_map' | 'geocoded' | 'preset' | 'ip';
 
 export interface ComplaintLocation {
   latitude: number;
@@ -740,6 +966,7 @@ export interface AgentToolResult {
   executionTimeMs: number;
   summary: string;
   data: any;
+  modelVersion?: string;
 }
 
 export interface AgentBriefing {
@@ -751,6 +978,7 @@ export interface AgentBriefing {
   toolResults: AgentToolResult[];
   recommendedActions: string[];
   uncertaintyDisclaimer: string;
+  modelUsed?: string;
 }
 
 // Runtime placeholder exports to guarantee Node.js 22 native type-stripping module resolution

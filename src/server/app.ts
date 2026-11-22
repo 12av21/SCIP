@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes';
+import verificationRoutes from './routes/verificationRoutes';
 import reportRoutes from './routes/reportRoutes';
 import incidentRoutes from './routes/incidentRoutes';
 import intelligenceRoutes from './routes/intelligenceRoutes';
@@ -16,9 +17,15 @@ import mapRoutes from './routes/mapRoutes';
 import imageRoutes from './routes/imageRoutes';
 import databaseRoutes from './routes/databaseRoutes';
 import indiaCivicRoutes from './routes/indiaCivicRoutes';
+import linkingRoutes from './routes/linkingRoutes';
+import datasetRoutes from './routes/datasetRoutes';
+import reportingRoutes from './routes/reportingRoutes';
+import notificationRoutes from './routes/notificationRoutes';
+import publicStatsRoutes from './routes/publicStatsRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
-import { validateJwtConfigOnStartup } from './middleware/auth.js';
+import { validateClerkConfigOnStartup } from './middleware/auth.js';
+import { buildCsp } from './csp.js';
 import { logger } from './logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,8 +38,8 @@ export interface CreateAppOptions {
 }
 
 export async function createApp(options: CreateAppOptions = {}) {
-  // Fail closed early in production if JWT config is missing/weak.
-  validateJwtConfigOnStartup();
+  // Fail closed early in production if Clerk config is missing/weak.
+  validateClerkConfigOnStartup();
 
   const app = express();
 
@@ -62,7 +69,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     if (process.env.NODE_ENV === 'production') {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'");
+      res.setHeader('Content-Security-Policy', buildCsp());
     }
     const origin = req.headers.origin;
     if (origin && corsOrigins.includes(origin)) {
@@ -122,17 +129,24 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // REST API Routes
   app.use('/api/auth', authRoutes);
+  app.use('/api/verification', verificationRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/incidents', incidentRoutes);
   app.use('/api/intelligence', intelligenceRoutes);
   app.use('/api/admin', adminRoutes);
+  // Clerk identity linking (Phase 3.1.3): bootstrap (/api/auth/linking/*) + admin queue (/api/admin/clerk-links/*).
+  app.use('/api', linkingRoutes);
   app.use('/api/locations', locationRoutes);
   app.use('/api/iplogs', iplogRoutes);
   app.use('/api/geoanalytics', geoanalyticsRoutes);
   app.use('/api/map', mapRoutes);
   app.use('/api/image', imageRoutes);
-app.use('/api/india', indiaCivicRoutes);
 app.use('/api/database', databaseRoutes);
+app.use('/api/india', indiaCivicRoutes);
+app.use('/api/dataset', datasetRoutes);
+app.use('/api/reporting', reportingRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/public', publicStatsRoutes);
 app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)
@@ -147,10 +161,13 @@ app.use('/api', miscRoutes);
     }
   });
 
-  const attachFrontend = options.attachFrontend !== false && process.env.NODE_ENV !== 'test';
+  // Allow serving the production-built frontend (dist/) in test mode for E2E tests
+  // when explicitly requested via SCIP_SERVE_DIST=1.
+  const serveDist = process.env.SCIP_SERVE_DIST === '1';
+  const attachFrontend = options.attachFrontend !== false && (process.env.NODE_ENV !== 'test' || serveDist);
   if (attachFrontend) {
-    // Development: Vite Middleware Mode; Production: Static dist
-    if (process.env.NODE_ENV === 'production') {
+    // Development: Vite Middleware Mode; Production: Static dist; Test+ServeDist: Static dist
+    if (process.env.NODE_ENV === 'production' || serveDist) {
       const distPath = path.resolve(rootDir, 'dist');
       app.use(express.static(distPath));
       app.get('*', (req, res) => {

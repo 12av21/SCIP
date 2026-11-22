@@ -51,10 +51,12 @@ export function validateMongoEnvironment(): { ok: boolean; warnings: string[] } 
     warnings.push('MONGODB_URI not set; MongoDB connectivity disabled (file-backed runtime remains active).');
     return { ok: true, warnings };
   }
-  // Basic safety checks without printing/returning the URI value.
+  // Allow Atlas (mongodb+srv / mongodb.net) only in explicit development mode with an isolated dev db name.
+  const isDev = process.env.NODE_ENV === 'development';
   const lower = uri.toLowerCase();
-  if (lower.includes('mongodb.net') || lower.includes('mongodb+srv://')) {
-    warnings.push('MONGODB_URI appears to target a hosted/Atlas cluster. Use only an isolated local development database (e.g. mongodb://127.0.0.1:27017/scip_dev).');
+  const isAtlas = lower.includes('mongodb.net') || lower.includes('mongodb+srv://');
+  if (isAtlas && !isDev) {
+    warnings.push('Atlas URIs are only permitted in development mode (NODE_ENV=development).');
     return { ok: false, warnings };
   }
   if (!/^mongodb(\+srv)?:\/\//i.test(uri)) {

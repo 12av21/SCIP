@@ -12,11 +12,15 @@ services:
       - PORT=3000
       - NODE_ENV=production
       - JWT_SECRET=${JWT_SECRET:?Set a strong JWT_SECRET (>=32 chars) before starting}
-      - MONGODB_URI=mongodb://scip-mongo:27017/scip_database
+      - DATABASE_DRIVER=json
       - AI_SERVICE_URL=http://scip-ai:8000
-    depends_on:
-      - scip-mongo
-      - scip-ai
+      - AI_SERVICE_ENABLED=false
+    # MongoDB and AI service are optional fallbacks; JSON backend is the production default.
+    # AI_SERVICE_ENABLED=false keeps the TypeScript engine as the sole runtime path;
+    # set to true to route supported capabilities to the Python scip-ai service.
+    # Node.js does not require scip-ai to start (no hard depends_on).
+    # Do not set MONGODB_URI in production: MongoDB runtime is gated (non-production, isolated
+    # localhost URI, explicit SCIP_MONGO_RUNTIME_INTEGRATED=true) and DATABASE_DRIVER=json is required.
     volumes:
       - scip_data:/app/data
     restart: unless-stopped

@@ -4,6 +4,8 @@ import { Router, Response } from 'express';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
 import { Incident } from '../../types/scip.js';
+import { notificationService } from '../../services/notificationService.js';
+import { NotificationEventType } from '../../types/scip.js';
 
 const router = Router();
 
@@ -179,6 +181,17 @@ router.post('/from-cluster', authenticate, requirePermission('incident.create'),
       }
     }
     const newIncident = await db.createIncidentFromCluster(cluster, req.user!);
+    
+    // Trigger notification for incident creation
+    await notificationService.processEvent('incident_created', {
+      incidentId: newIncident.id,
+      category: newIncident.category,
+      location: newIncident.locationName,
+      priority: newIncident.priority,
+      assignedTo: newIncident.assignedOfficerId,
+      departmentId: newIncident.assignedDepartmentId
+    });
+    
     res.status(201).json({ success: true, message: 'Potential incident created from cluster observation.', data: newIncident });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
@@ -245,6 +258,27 @@ router.post('/:id/resolve', authenticate, requirePermission('incident.resolve'),
       preventiveMeasures: typeof preventiveMeasures === 'string' ? preventiveMeasures.trim() : undefined,
       costEstimate: parsedCost
     });
+    
+    // Trigger notification for incident resolution
+    await notificationService.processEvent('incident_updated', {
+      incidentId: req.params.id,
+      newStatus: 'resolved',
+      updateMessage: actionTaken.trim()
+    });
+    
+    // Also trigger report_resolved for linked reports
+    for (const reportId of existing.reportIds) {
+      const report = await db.getReportById(reportId);
+      if (report) {
+        await notificationService.processEvent('report_resolved', {
+          reportId,
+          resolution: actionTaken.trim(),
+          resolvedBy: req.user!.name,
+          citizenId: report.citizenId
+        });
+      }
+    }
+    
     res.json({ success: true, message: `Incident ${req.params.id} has been marked resolved.`, data: resolved });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
@@ -392,6 +426,17 @@ router.post('/:id/assign', authenticate, requirePermission('incident.assign'), a
     }
 
     const updated = await db.assignIncidentOfficer(req.params.id, targetDeptId, officerId.trim(), officerName.trim(), req.user!, typeof notes === 'string' ? notes.trim() : '');
+    
+    // Trigger notification for incident assignment
+    await notificationService.processEvent('incident_assigned', {
+      incidentId: req.params.id,
+      category: incident.category,
+      location: incident.locationName,
+      priority: incident.priority,
+      assignedTo: officerId,
+      departmentId: targetDeptId
+    });
+    
     res.json({ success: true, message: `Field officer ${officerName.trim()} assigned to incident.`, data: updated });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
@@ -411,7 +456,117 @@ router.post('/:id/escalate', authenticate, requirePermission('incident.escalate'
       res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
     }
     const escalated = await db.escalateIncident(req.params.id, req.user!, reason.trim());
+    
+    // Trigger notification for incident escalation
+    await notificationService.processEvent('incident_escalated', {
+      incidentId: req.params.id,
+      category: incident.category,
+      location: incident.locationName,
+      priority: 'P1_CRITICAL',
+      escalationReason: reason.trim(),
+      escalatedTo: 'Authority Director'
+    });
+    
     res.json({ success: true, message: `Incident ${req.params.id} escalated to P1_CRITICAL priority.`, data: escalated });
+  } catch (err: any) {
+    const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
+    res.status(400).json({ success: false, message: msg });
+  }
+});
+
+router.post('/:id/close', authenticate, requirePermission('incident.resolve'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { notes } = req.body || {};
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 2000)) { res.status(400).json({ success: false, message: 'Close notes must be a string up to 2000 characters.' }); return; }
+    const incident = await db.getIncidentById(req.params.id);
+    if (!incident) { res.status(404).json({ success: false, message: 'Incident not found.' }); return; }
+    if (!(await canAccessIncident(req.user!, incident))) { res.status(403).json({ success: false, message: 'Forbidden.' }); return; }
+    if (req.user?.role === 'dept_officer' && req.user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== req.user.departmentId) {
+      res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
+    }
+    if (req.user?.role === 'officer' && req.user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== req.user.departmentId) {
+      res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
+    }
+    if (incident.status !== 'resolved') {
+      res.status(400).json({ success: false, message: `Only resolved incidents can be closed. Current status: ${incident.status}` }); return;
+    }
+    const closed = await db.closeIncident(req.params.id, req.user!, notes?.trim());
+    
+    // Trigger notification for incident closure
+    await notificationService.processEvent('incident_closed', {
+      incidentId: req.params.id,
+      resolution: incident.resolutionNotes || 'Resolved',
+      closedBy: req.user!.name,
+      resolutionTime: incident.resolvedAt || 'N/A'
+    });
+    
+    res.json({ success: true, message: `Incident ${req.params.id} has been closed.`, data: closed });
+  } catch (err: any) {
+    const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
+    res.status(400).json({ success: false, message: msg });
+  }
+});
+
+router.post('/:id/reopen', authenticate, requirePermission('incident.update'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { reason } = req.body || {};
+    if (typeof reason !== 'string' || !reason.trim()) { res.status(400).json({ success: false, message: 'Official reason for reopening is mandatory.' }); return; }
+    if (reason.length > 2000) { res.status(400).json({ success: false, message: 'Reopening reason must be 2000 characters or fewer.' }); return; }
+    const incident = await db.getIncidentById(req.params.id);
+    if (!incident) { res.status(404).json({ success: false, message: 'Incident not found.' }); return; }
+    if (!(await canAccessIncident(req.user!, incident))) { res.status(403).json({ success: false, message: 'Forbidden.' }); return; }
+    if (req.user?.role === 'dept_officer' && req.user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== req.user.departmentId) {
+      res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
+    }
+    if (req.user?.role === 'officer' && req.user.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== req.user.departmentId) {
+      res.status(403).json({ success: false, message: 'Forbidden: department boundary violation.' }); return;
+    }
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      res.status(400).json({ success: false, message: `Only resolved or closed incidents can be reopened. Current status: ${incident.status}` }); return;
+    }
+    const reopened = await db.reopenIncident(req.params.id, req.user!, reason.trim());
+    
+    // Trigger notification for incident reopening
+    await notificationService.processEvent('incident_reopened', {
+      incidentId: req.params.id,
+      reason: reason.trim(),
+      reopenedBy: req.user!.name
+    });
+    
+    res.json({ success: true, message: `Incident ${req.params.id} has been reopened.`, data: reopened });
+  } catch (err: any) {
+    const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
+    res.status(400).json({ success: false, message: msg });
+  }
+});
+
+router.post('/:id/verify-resolution', authenticate, requirePermission('incident.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { verified, comments } = req.body || {};
+    if (typeof verified !== 'boolean') { res.status(400).json({ success: false, message: 'Verification decision (boolean) is required.' }); return; }
+    if (comments !== undefined && (typeof comments !== 'string' || comments.length > 1000)) { res.status(400).json({ success: false, message: 'Comments must be a string up to 1000 characters.' }); return; }
+    const incident = await db.getIncidentById(req.params.id);
+    if (!incident) { res.status(404).json({ success: false, message: 'Incident not found.' }); return; }
+    if (!(await canAccessIncident(req.user!, incident))) { res.status(403).json({ success: false, message: 'Forbidden.' }); return; }
+    if (req.user?.role !== 'citizen') {
+      res.status(403).json({ success: false, message: 'Only citizens can verify resolutions for their own reports.' }); return;
+    }
+    // Check citizen owns one of the linked reports
+    const report = (await Promise.all(incident.reportIds.map(rid => db.getReportById(rid)))).find(r => r?.citizenId === req.user!.id);
+    if (!report) { res.status(403).json({ success: false, message: 'Citizen not associated with this incident.' }); return; }
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      res.status(400).json({ success: false, message: `Resolution can only be verified for resolved or closed incidents. Current status: ${incident.status}` }); return;
+    }
+    const verifiedIncident = await db.verifyResolution(req.params.id, req.user!.id, verified, comments?.trim());
+    
+    // Trigger notification for incident resolution verification
+    await notificationService.processEvent('incident_verified', {
+      incidentId: req.params.id,
+      citizenName: req.user!.name,
+      feedback: comments?.trim() || ''
+    });
+    
+    res.json({ success: true, message: `Resolution ${verified ? 'verified' : 'disputed'} by citizen.`, data: verifiedIncident });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;
     res.status(400).json({ success: false, message: msg });

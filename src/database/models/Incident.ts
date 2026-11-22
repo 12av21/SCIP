@@ -27,6 +27,12 @@ export interface IIncidentDocument extends Document {
   resolutionNotes?: string;
   resolvedAt?: string;
   evidence: string[];
+  // India location context (additive, preserves existing records)
+  stateId?: string;
+  districtId?: string;
+  subDistrictId?: string;
+  blockId?: string;
+  localityId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +69,12 @@ const IncidentSchema = new Schema<IIncidentDocument>(
     resolutionNotes: { type: String },
     resolvedAt: { type: String },
     evidence: [{ type: String }],
+    // India location context (additive, preserves existing records)
+    stateId: { type: String },
+    districtId: { type: String },
+    subDistrictId: { type: String },
+    blockId: { type: String },
+    localityId: { type: String },
     createdAt: { type: String, required: true, index: true },
     updatedAt: { type: String, required: true }
   },
@@ -71,5 +83,9 @@ const IncidentSchema = new Schema<IIncidentDocument>(
 
 IncidentSchema.index({ latitude: 1, longitude: 1 });
 IncidentSchema.index({ createdAt: -1 });
+// Composite index for active-incident officer lookups
+IncidentSchema.index({ assignedOfficerId: 1, status: 1 });
+// Composite index for department-scoped incident queries
+IncidentSchema.index({ assignedDepartmentId: 1, status: 1 });
 
 export const IncidentModel = mongoose.models.Incident || mongoose.model<IIncidentDocument>('Incident', IncidentSchema);

@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/apiClient';
 import { Report, ReportCategory, UrgencyLevel, AIAnalysis, AdminState, AdminDistrict, AdminSubDistrict, AdminBlock, AdminLocality } from '../../types/scip';
 import { classifyReport, extractEntities, determineSeverity } from '../../ai/classifier';
+import { geolocationService, LocationResult } from '../../services/geolocation';
 import {
   FileText,
   MapPin,
@@ -22,7 +23,9 @@ import {
   LocateIcon as MyLocation,
   Crosshair,
   Globe,
-  Home
+  Home,
+  Wifi,
+  Satellite
 } from 'lucide-react';
 
 interface SubmitReportViewProps {
@@ -30,16 +33,9 @@ interface SubmitReportViewProps {
   onNavigateToMyReports?: () => void;
 }
 
-const PRESET_LOCATIONS = [
-  { name: 'Sector 4 Market Entrance', lat: 28.6142, lng: 77.2091 },
-  { name: 'Sector 4 Market Gate 2', lat: 28.6145, lng: 77.2094 },
-  { name: 'West Boulevard Transformer 14', lat: 28.6253, lng: 77.2184 },
-  { name: 'North Industrial Expressway Ramp B', lat: 28.6380, lng: 77.2300 },
-  { name: 'Central Plaza Food Street', lat: 28.6100, lng: 77.2050 },
-  { name: 'Riverfront Canal Footbridge', lat: 28.6180, lng: 77.2120 }
-];
+const PRESET_LOCATIONS: { name: string; lat: number; lng: number }[] = [];
 
-const DEFAULT_CENTER: [number, number] = [28.6139, 77.2090];
+const DEFAULT_CENTER: [number, number] = [20.5937, 78.9629];
 
 export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   onReportCreated,
@@ -48,7 +44,7 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ReportCategory>('Water & Drainage');
-  const [locationName, setLocationName] = useState('Sector 4 Market Entrance');
+  const [locationName, setLocationName] = useState('');
   const [latitude, setLatitude] = useState(DEFAULT_CENTER[0]);
   const [longitude, setLongitude] = useState(DEFAULT_CENTER[1]);
   const [urgency, setUrgency] = useState<UrgencyLevel>('medium');
@@ -68,14 +64,60 @@ export const SubmitReportView: React.FC<SubmitReportViewProps> = ({
   const [address, setAddress] = useState('');
   const [landmark, setLandmark] = useState('');
   const [pinCode, setPinCode] = useState('');
-  const [locationSource, setLocationSource] = useState<'gps' | 'manual_map' | 'geocoded' | 'preset'>('manual_map');
+  const [locationSource, setLocationSource] = useState<'gps' | 'manual_map' | 'geocoded' | 'preset' | 'ip'>('manual_map');
 
-  const [aiSuggestion, setAiSuggestion] = useState<any>(null);
+const [aiSuggestion, setAiSuggestion] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedResult, setSubmittedResult] = useState<{ report: Report; analysis: AIAnalysis } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [mapReady, setMapReady] = useState(false);
-const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+
+  const handleUseIPLocation = async () => {
+    setGpsLoading(true);
+    setErrorMessage('');
+    try {
+      const result = await geolocationService.getIPLocation();
+      const { latitude: lat, longitude: lng } = result.location;
+const accuracy = result.location.locationAccuracyMeters;
+
+      setLatitude(lat);
+      setLongitude(lng);
+      setLocationSource(result.location.locationSource as any);
+      setLocationName(geolocationService.formatLocation(result.location));
+      setLocationAccuracy(accuracy ?? null);
+      
+      // Set administrative hierarchy if available
+      if (result.location.stateId) setSelectedStateId(result.location.stateId);
+      if (result.location.districtId) setSelectedDistrictId(result.location.districtId);
+      if (result.location.subDistrictId) setSelectedSubDistrictId(result.location.subDistrictId);
+      if (result.location.blockId) setSelectedBlockId(result.location.blockId);
+      if (result.location.localityId) setSelectedLocalityId(result.location.localityId);
+      if (result.location.pinCode) setPinCode(result.location.pinCode);
+      if (result.location.address) setAddress(result.location.address);
+      if (result.location.landmark) setLandmark(result.location.landmark);
+
+      if (mapRef.current) {
+        mapRef.current.flyTo([lat, lng] as [number, number], 12);
+        if (markerRef.current) {
+          markerRef.current.setLatLng([lat, lng]);
+        }
+        if (circleRef.current) {
+          circleRef.current.setLatLng([lat, lng]).setRadius(accuracy || 5000);
+        }
+      }
+
+      if (result.fallbackUsed) {
+        setErrorMessage(`Using IP-based location: ${result.fallbackReason}`);
+        setTimeout(() => setErrorMessage(''), 5000);
+      }
+    } catch {
+      setErrorMessage('Unable to detect IP location. Please use GPS or manual map selection.');
+    } finally {
+      setGpsLoading(false);
+    }
+  };
 
 const mapRef = useRef<L.Map | null>(null);
 const markerRef = useRef<L.Marker | null>(null);
@@ -87,7 +129,7 @@ useEffect(() => {
   if (!mapRef.current) {
     const map = L.map(containerRef.current, {
       center: DEFAULT_CENTER,
-      zoom: 13,
+      zoom: 5,
       zoomControl: false,
       attributionControl: false
     });
@@ -250,21 +292,35 @@ useEffect(() => {
   }, [selectedBlockId]);
 
   const handleUseGPS = async () => {
-    if (!navigator.geolocation) {
-      setErrorMessage('Geolocation is not supported by your browser.');
-      return;
-    }
     setGpsLoading(true);
     setErrorMessage('');
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      // Use smart location detection with GPS -> IP -> Default fallback
+      const result: LocationResult = await geolocationService.detectLocation({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
       });
-      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+
+      const { latitude: lat, longitude: lng } = result.location;
+      const accuracy = result.location.locationAccuracyMeters;
+
       setLatitude(lat);
       setLongitude(lng);
-      setLocationSource('gps');
-      setLocationName(`GPS location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+      setLocationSource(result.location.locationSource as any);
+      setLocationName(geolocationService.formatLocation(result.location));
+      setLocationAccuracy(accuracy ?? null);
+      
+      // Set administrative hierarchy if available
+      if (result.location.stateId) setSelectedStateId(result.location.stateId);
+      if (result.location.districtId) setSelectedDistrictId(result.location.districtId);
+      if (result.location.subDistrictId) setSelectedSubDistrictId(result.location.subDistrictId);
+      if (result.location.blockId) setSelectedBlockId(result.location.blockId);
+      if (result.location.localityId) setSelectedLocalityId(result.location.localityId);
+      if (result.location.pinCode) setPinCode(result.location.pinCode);
+      if (result.location.address) setAddress(result.location.address);
+      if (result.location.landmark) setLandmark(result.location.landmark);
+
       if (mapRef.current) {
         mapRef.current.flyTo([lat, lng] as [number, number], 16);
         if (markerRef.current) {
@@ -273,6 +329,12 @@ useEffect(() => {
         if (circleRef.current) {
           circleRef.current.setLatLng([lat, lng]).setRadius(accuracy || 10);
         }
+      }
+
+      // Show fallback info if used
+      if (result.fallbackUsed) {
+        setErrorMessage(`Using ${result.source.toUpperCase()} location: ${result.fallbackReason}`);
+        setTimeout(() => setErrorMessage(''), 5000);
       }
     } catch {
       setErrorMessage('Unable to access your location. Please use the map or enter coordinates manually.');
@@ -287,6 +349,7 @@ useEffect(() => {
     setLongitude(lng);
     setLocationSource('manual_map');
     setLocationName(`Map-selected location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+    setLocationAccuracy(null);
     if (markerRef.current) {
       markerRef.current.setLatLng([lat, lng]);
     }
@@ -305,6 +368,14 @@ useEffect(() => {
     }
     if (description.trim().length < 10) {
       setErrorMessage('Please provide more detail in the description (at least 10 characters).');
+      return;
+    }
+    if (pinCode.trim() && !/^[1-9][0-9]{5}$/.test(pinCode.trim())) {
+      setErrorMessage('Please enter a valid 6-digit Indian PIN code or leave it blank.');
+      return;
+    }
+    if (!locationName.trim()) {
+      setErrorMessage('Please select or enter a location for the report.');
       return;
     }
 
@@ -328,7 +399,7 @@ useEffect(() => {
         landmark: landmark.trim() || undefined,
         pinCode: pinCode.trim() || undefined,
         locationSource,
-        locationAccuracyMeters: undefined,
+        locationAccuracyMeters: locationAccuracy || undefined,
         locationConfirmedAt: new Date().toISOString()
       });
 
@@ -345,7 +416,7 @@ useEffect(() => {
     setTitle('');
     setDescription('');
     setCategory('Water & Drainage');
-    setLocationName('Sector 4 Market Entrance');
+    setLocationName('');
     setLatitude(DEFAULT_CENTER[0]);
     setLongitude(DEFAULT_CENTER[1]);
     setUrgency('medium');
@@ -362,7 +433,7 @@ useEffect(() => {
     setSubmittedResult(null);
     setErrorMessage('');
     if (mapRef.current && markerRef.current) {
-      mapRef.current.flyTo(DEFAULT_CENTER, 13);
+      mapRef.current.flyTo(DEFAULT_CENTER, 5);
       markerRef.current.setLatLng(DEFAULT_CENTER);
     }
   };
@@ -655,103 +726,105 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Right: Interactive Map */}
-          <div className="lg:col-span-1 space-y-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-bold text-[#153E63] flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5" />
-                Location Selection
-              </span>
-              <button
-                type="button"
-                onClick={handleUseGPS}
-                disabled={gpsLoading}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold bg-[#EAF2F8] hover:bg-[#dbeafe] border border-[#DCE3EA] text-[#1F5F91] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {gpsLoading ? (
-                  <span className="flex items-center gap-1"><span className="animate-spin"></span> Using GPS...</span>
-                ) : (
-                  <>
-                    <MyLocation className="w-3 h-3" /> Use My Location (GPS)
-                  </>
-                )}
-              </button>
-            </div>
+            <div className="lg:col-span-1 space-y-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-[#153E63] flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5" />
+                  Location Selection
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseGPS}
+                    disabled={gpsLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold bg-[#EAF2F8] hover:bg-[#dbeafe] border border-[#DCE3EA] text-[#1F5F91] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {gpsLoading ? (
+                      <span className="flex items-center gap-1"><span className="animate-spin"></span> Detecting...</span>
+                    ) : (
+                      <>
+                        <MyLocation className="w-3 h-3" /> Use My Location (GPS)
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseIPLocation}
+                    disabled={gpsLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-[#F5F7FA] border border-[#DCE3EA] text-[#657586] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Detect location via IP address (less accurate)"
+                  >
+                    <Wifi className="w-3 h-3" /> Auto (IP)
+                  </button>
+                </div>
+              </div>
 
-            <div className="relative flex-1 bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg overflow-hidden shadow-xs">
-              <div ref={containerRef} className="w-full h-64" />
-              <div className="absolute top-2 right-2 z-10 flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (mapRef.current) mapRef.current.flyTo(DEFAULT_CENTER, 13);
-                  }}
-                  className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm"
-                  title="Reset map view"
-                >
-                  <Home className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleUseGPS}
-                  disabled={gpsLoading}
-                  className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm disabled:opacity-50"
-                  title="Center on GPS location"
-                >
-                  <MyLocation className="w-4 h-4" />
-                </button>
+              <div className="relative flex-1 bg-[#F5F7FA] border border-[#DCE3EA] rounded-lg overflow-hidden shadow-xs">
+                <div ref={containerRef} className="w-full h-64" />
+                <div className="absolute top-2 right-2 z-10 flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (mapRef.current) mapRef.current.flyTo(DEFAULT_CENTER, 5);
+                    }}
+                    className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm"
+                    title="Reset map view"
+                  >
+                    <Home className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUseGPS}
+                    disabled={gpsLoading}
+                    className="p-2 bg-white border border-[#DCE3EA] rounded text-[#253443] hover:bg-[#EAF2F8] transition-colors shadow-sm disabled:opacity-50"
+                    title="Center on detected location"
+                  >
+                    <Crosshair className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="text-[#657586] font-medium">Coordinates:</span>
+                <span className="font-mono text-[#1F5F91] font-bold">
+                  {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                </span>
+                <span className="px-1 text-[#DCE3EA]">|</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  locationSource === 'gps' ? 'bg-[#D1FAE5] text-[#065F46]' :
+                  locationSource === 'ip' ? 'bg-[#FEF3C7] text-[#92400E]' :
+                  locationSource === 'preset' ? 'bg-[#E0E7FF] text-[#3730A3]' :
+                  'bg-[#EAF2F8] text-[#1F5F91]'
+                }`}>
+                  {locationSource === 'gps' ? 'GPS' :
+                   locationSource === 'ip' ? 'IP-Based' :
+                   locationSource === 'preset' ? 'Preset' : 'Manual Map'}
+                </span>
+                {locationAccuracy && (
+                  <span className="text-[10px] text-[#657586] bg-white px-2 py-0.5 rounded border border-[#DCE3EA]">
+                    ±{Math.round(locationAccuracy)}m
+                  </span>
+                )}
               </div>
             </div>
-
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-[#657586] font-medium">Coordinates:</span>
-              <span className="font-mono text-[#1F5F91] font-bold">
-                {latitude.toFixed(4)}, {longitude.toFixed(4)}
-              </span>
-              <span className="px-1 text-[#DCE3EA]">|</span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                locationSource === 'gps' ? 'bg-[#D1FAE5] text-[#065F46]' : 'bg-[#EAF2F8] text-[#1F5F91]'
-              }`}>
-                {locationSource === 'gps' ? 'GPS' : locationSource === 'preset' ? 'Preset' : 'Manual Map'}
-              </span>
-            </div>
           </div>
-        </div>
 
-        {/* Quick Municipal Location Presets */}
+        {/* Location Description */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="block text-xs font-bold text-[#153E63] mb-0">
               Civic Landmark / Location Description <span className="text-[#B42318]">*</span>
             </label>
-            <span className="text-[10px] text-[#657586]">Tap map, use GPS, or choose preset</span>
+            <span className="text-[10px] text-[#657586]">Tap map, use GPS, or enter a description</span>
           </div>
           <input
             type="text"
             required
             value={locationName}
             onChange={e => setLocationName(e.target.value)}
+            placeholder="Describe the location (street, landmark, area)"
             className="w-full px-3.5 py-2.5 text-xs text-[#253443] bg-[#F5F7FA] focus:bg-white border border-[#DCE3EA] focus:border-[#1F5F91] rounded-lg focus:outline-hidden transition-colors"
           />
-          <div className="mt-2.5 text-xs text-[#657586]">
-            <span className="text-[11px] font-semibold text-[#153E63]">Verified Civic Presets:</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {PRESET_LOCATIONS.map(p => (
-                <button
-                  type="button"
-                  key={p.name}
-                  onClick={() => handleLocationPreset(p)}
-                  className={`px-2.5 py-1 rounded text-[11px] border transition-colors cursor-pointer ${
-                    locationName === p.name
-                      ? 'bg-[#1F5F91] border-[#1F5F91] text-white font-bold'
-                      : 'bg-[#F5F7FA] border-[#DCE3EA] text-[#253443] hover:bg-[#EAF2F8]'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* GPS Coordinates (read-only preview) */}

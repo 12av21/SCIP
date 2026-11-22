@@ -22,7 +22,11 @@ import {
   ShieldAlert,
   BarChart3,
   SlidersHorizontal,
-  Globe
+  Globe,
+  Crown,
+  FileSpreadsheet,
+  Calendar,
+  Bell
 } from 'lucide-react';
 
 interface GovernmentNavigationProps {
@@ -45,15 +49,17 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
     setIsMobileMenuOpen(false);
   };
 
-  // Dynamically generate role-scoped navigation items
   const getNavItems = () => {
     if (!user) {
       return [
         { id: 'home', label: t('nav.home', 'Home'), icon: Home },
+        { id: 'features', label: 'Features', icon: SlidersHorizontal },
+        { id: 'how-it-works', label: 'How It Works', icon: CheckCircle2 },
+        { id: 'community-reporting', label: 'Community Reporting', icon: FileText },
+        { id: 'ai-intelligence', label: 'AI Intelligence', icon: Cpu },
         { id: 'track-report', label: t('nav.track_grievance', 'Track Grievance'), icon: Search },
         { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
-        { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info },
-        { id: 'tests', label: t('nav.system_audit', 'Audit Suite'), icon: CheckCircle2 }
+        { id: 'help-support', label: 'Help & Support', icon: Info }
       ];
     }
 
@@ -65,6 +71,8 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'field-officer-dashboard', label: t('nav.field_operations', 'Field Operations'), icon: ClipboardCheck },
           { id: 'incidents', label: t('nav.work_orders', 'Incident Work Orders'), icon: AlertTriangle },
           { id: 'map', label: t('nav.geospatial_map', 'Complaint Map'), icon: MapPin },
+          { id: 'reporting', label: 'Reporting Center', icon: FileSpreadsheet },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }
@@ -77,6 +85,8 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'dept-officer-dashboard', label: t('nav.dept_desk', 'Department Desk'), icon: Building2 },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
           { id: 'map', label: t('nav.geospatial_map', 'Complaint Map'), icon: MapPin },
+          { id: 'reporting', label: 'Reporting Center', icon: FileSpreadsheet },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'trends', label: t('nav.sla_trends', 'SLA Trends'), icon: TrendingUp },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
@@ -91,6 +101,8 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
           { id: 'trends', label: t('nav.trends_recurrence', 'Trends & Recurrence'), icon: TrendingUp },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
+          { id: 'reporting', label: 'Reporting Center', icon: FileSpreadsheet },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'agent', label: t('nav.scip_agent', 'SCIP Agent'), icon: Cpu },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
           { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }
@@ -100,11 +112,14 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
         // Authority Director
         return [
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
-          { id: 'intel-dashboard', label: t('nav.command_center', 'Command Dashboard'), icon: Radio },
+          { id: 'authority-dashboard', label: t('nav.command_center', 'Strategic Command'), icon: Crown, isHighlight: true },
+          { id: 'intel-dashboard', label: t('nav.command_center', 'Intelligence Center'), icon: Radio },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
           { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
           { id: 'trends', label: t('nav.trends_recurrence', 'Trend Analytics'), icon: TrendingUp },
+          { id: 'reporting', label: 'Reporting Center', icon: FileSpreadsheet },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'agent', label: t('nav.scip_agent', 'Decision Agent'), icon: Cpu },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Report'), icon: Search },
@@ -115,15 +130,16 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
         // Super Administrator
         return [
           { id: 'home', label: t('nav.home', 'Home'), icon: Home },
-          { id: 'admin-panel', label: t('nav.admin_governance', 'Governance & Audit'), icon: SlidersHorizontal },
+          { id: 'admin-panel', label: t('nav.admin_governance', 'Administration'), icon: SlidersHorizontal },
           { id: 'intel-dashboard', label: t('nav.command_center', 'Command Center'), icon: Radio },
           { id: 'incidents', label: t('nav.incident_queue', 'Incident Queue'), icon: AlertTriangle },
           { id: 'analyst-dashboard', label: t('nav.analytics_models', 'Model Metrics'), icon: BarChart3 },
           { id: 'geo-analytics', label: t('nav.geo_analytics', 'Geographic Analytics'), icon: Globe },
-          { id: 'tests', label: t('nav.system_audit', 'System Audit'), icon: CheckCircle2 },
           { id: 'map', label: t('nav.geospatial_map', 'Geospatial Map'), icon: MapPin },
+          { id: 'reporting', label: 'Reporting Center', icon: FileSpreadsheet },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
-          { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }
+          { id: 'about', label: t('nav.citizen_charter', 'About'), icon: Info }
         ];
 
       case 'citizen':
@@ -134,6 +150,7 @@ export const GovernmentNavigation: React.FC<GovernmentNavigationProps> = ({
           { id: 'citizen-dashboard', label: t('nav.citizen_services', 'Citizen Services'), icon: Radio },
           { id: 'submit-report', label: t('nav.file_grievance', 'File Grievance'), icon: PlusCircle, isHighlight: true },
           { id: 'my-reports', label: t('nav.my_grievances', 'My Grievances'), icon: FileText },
+          { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'track-report', label: t('nav.track_grievance', 'Track Grievance'), icon: Search },
           { id: 'departments', label: t('nav.departments', 'Departments'), icon: Building2 },
           { id: 'about', label: t('nav.citizen_charter', 'Citizen Charter'), icon: Info }

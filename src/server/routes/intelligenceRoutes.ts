@@ -4,6 +4,7 @@ import { Router, Response } from 'express';
 import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
 import { SCIPIntelligenceAgent } from '../../ai/scipAgent.js';
+import { semanticIntelligence } from '../../ai/semanticIntelligence.js';
 import { detectIncidentClusters } from '../../ai/incidentClustering.js';
 import {
   generateCitizenResponse,
@@ -81,7 +82,7 @@ router.post('/agent', authenticate, requirePermission('intelligence.read'), asyn
       return;
     }
     const agent = await getAgentInstance(req.user);
-    const briefing = agent.executeIntelligenceQuery(query.trim(), typeof specificTool === 'string' ? specificTool.trim() : undefined);
+    const briefing = await agent.executeIntelligenceQuery(query.trim(), typeof specificTool === 'string' ? specificTool.trim() : undefined);
     res.json({ success: true, data: briefing });
   } catch (err: any) {
     res.status(500).json({ success: false, message: 'Agent execution failed.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
@@ -159,6 +160,15 @@ router.get('/dataset-quality', authenticate, requirePermission('analytics.read')
     res.json({ success: true, data: quality });
   } catch (err: any) {
     res.status(500).json({ success: false, message: 'Failed to compute dataset quality audit.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
+  }
+});
+
+router.get('/semantic-evaluation', authenticate, requirePermission('model.evaluate'), async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const evaluation = await semanticIntelligence.runFullEvaluation();
+    res.json({ success: true, data: evaluation });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Failed to run semantic evaluation.', errors: [process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message] });
   }
 });
 

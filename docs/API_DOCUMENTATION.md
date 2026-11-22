@@ -1,117 +1,147 @@
-# SCIP — API Documentation
+# SCIP API Documentation
 
-**Project:** Smart Community Intelligence Platform (SCIP)  
-**Date:** 2026-11-11  
-**Base URL:** `/api`  
-**Auth:** `Authorization: Bearer <JWT>` for protected endpoints (unless noted).  
-**Status:** Evidence-based from route source (`src/server/routes/*.ts`, `src/server/app.ts`). Not exhaustive runtime certification.
+## Authentication
+All endpoints require `Authorization: Bearer <clerk_token>` except where noted. Token verified via Clerk SDK.
 
-## 1. Conventions
+## Modules
 
-- **Response envelope (typical):** `{ success: boolean, message?: string, data?: any, meta?: any, errors?: any }` (varies by endpoint; check handlers for exact shape).
-- **Validation errors:** generally `400` with `message`/`errors` (sanitized in production).
-- **Auth failures:** `401` (missing/invalid/expired/revoked/malformed token, or auth-state enforcement failures per flow).
-- **Authorization failures:** `403` (insufficient permission/role/scope/suspended/reset-required or boundary/state guard).
-- **Not found:** `404` for missing resources; `/api/*` unknown paths return JSON `404`.
-- **Rate limiting:** best-effort in-memory, single-process (`/api/auth`: 60/min, other `/api`: 300/min per IP bucket; disabled when `DISABLE_RATE_LIMIT=true` in tests).
-- **Content limits:** JSON/urlencoded body limit `10mb`.
-- **CORS:** allowed only for origins in `CORS_ORIGINS` (comma-separated). Preflight returns `204`.
-- **Production notes:** JWT must be configured/strong; stack/details redacted in many error paths.
+### Auth (authRoutes.ts)
+- GET /api/auth/me - current user
+- POST /api/auth/logout
+- PUT /api/auth/profile - update profile
+- DELETE /api/auth/account
 
-## 2. Authentication (`/api/auth`)
+### Reports (reportRoutes.ts)
+- GET /api/reports - list (filter: citizenId, status, category, urgency, incidentId)
+- GET /api/reports/:id - get by ID
+- POST /api/reports - create (title, description, category, locationName, latitude, longitude, urgency, images, stateId, districtId, etc.)
+- PUT /api/reports/:id - update
+- DELETE /api/reports/:id - withdraw
+- POST /api/reports/:id/reject - reject
+- POST /api/reports/:id/reanalyze - reanalyze
 
-| Method | Path | Auth | Permission/Guard | Description | Key request fields | Success |
-|---|---|---|---|---|---|---|
-| POST | `/register` | No | Public (self-register forced to `citizen`) | Create citizen account | `name,email,password,phone?` (validated) | `201` sanitized user (no auth internals) |
-| POST | `/login` | No | Public | Authenticate user | `email,password` | `200` token + sanitized user |
-| POST | `/demo-login` | No | **Dev-only opt-in** (`ENABLE_DEV_DEMO_LOGIN=true`, non-production) else `404/disabled` | Demo session | role/demo payload as implemented | token + sanitized user (dev only) |
-| GET | `/me` | Yes | `authenticate` | Current user profile | - | sanitized user |
-| POST | `/logout` | Yes | `authenticate` | Invalidate session (version bump semantics as implemented) | - | success |
-| POST | `/change-password` | Yes | `authenticate` (+ state checks) | Change own password | `currentPassword,newPassword` | success; session invalidation behavior as implemented |
-| PUT | `/profile` | Yes | `authenticate` | Update allowed profile fields | allowlisted fields | sanitized user |
-| POST | `/reset-password` | No | Public safe flow | Request credential reset workflow | `email` (and flow inputs as implemented) | generic/safe response (no enumeration intent) |
+### Incidents (incidentRoutes.ts)
+- GET /api/incidents - list
+- GET /api/incidents/:id - get by ID
+- POST /api/incidents/from-cluster - create from cluster
+- POST /api/incidents/:id/review - review
+- POST /api/incidents/:id/resolve - resolve
+- POST /api/incidents/:id/assign - assign officer
+- POST /api/incidents/:id/escalate - escalate
+- GET /api/incidents/:id/inspections - list inspections
+- POST /api/incidents/:id/inspections - create inspection
+- POST /api/incidents/:id/inspections/:iid/verify - verify inspection
 
-**Security:** bcrypt-only verification, session version (`sv`) checks, suspension and `credentialsResetRequired` enforcement in hardened paths, expired tokens rejected (`401`).
+### Admin (adminRoutes.ts)
+- GET /api/admin/users - list users
+- PUT /api/admin/users/:id/role - update role
+- PUT /api/admin/users/:id/status - update status
+- POST /api/admin/users - create user
+- GET /api/admin/departments - list departments
+- GET /api/admin/audit-logs - list audit logs
+- GET /api/admin/audit-verify - verify audit integrity
+- GET /api/admin/system-stats - system stats
+- POST /api/admin/backup - create backup
+- GET /api/admin/backups - list backups
+- POST /api/admin/prune - prune backups
+- POST /api/admin/restore-rehearsal - restore rehearsal
 
-## 3. Reports (`/api/reports`)
+### Linking (linkingRoutes.ts)
+- POST /api/linking/request - create linking request
+- POST /api/linking/onboard - onboard new citizen
+- GET /api/linking/status - linking status
+- POST /api/linking/cancel - cancel
+- POST /api/linking/challenge - submit challenge
+- GET /api/linking/admin/pending - pending links (admin)
+- POST /api/linking/admin/:id/approve - approve
+- POST /api/linking/admin/:id/reject - reject
 
-| Method | Path | Auth | Permission | Description | Notes |
-|---|---|---|---|---|---|
-| GET | `/` | Yes | `report.read` | List reports (scoped/filtered) | Citizen sees own; officer/dept scoped per rules; query filters as implemented |
-| GET | `/:id` | Yes | `report.read` | Report detail | Ownership/department/role scoping; analyst PII minimization in hardened paths |
-| POST | `/` | Yes | `report.create` (+ rate/validation) | Submit report | Strict validation, category/location/geo/length checks; AI analysis pipeline invoked as implemented |
-| PUT | `/:id` | Yes | `report.update` | Update report | Role/state/allowlist constrained; ownership/scoping enforced |
-| DELETE | `/:id` | Yes | `report.update` (withdraw semantics per rules) | Withdraw/delete per policy | State/ownership/permission guards |
-| POST | `/:id/reject` | Yes | Authorized review role/workflow | Reject report | Requires valid reason/state/permission |
-| POST | `/:id/reanalyze` | Yes | `intelligence.read` (and report access) | Re-run AI analysis | Scoped to accessible report; decision-support output |
+### Images (imageRoutes.ts)
+- POST /api/image/upload - upload base64 data URL
+- GET /api/image/metadata/:id - metadata
+- POST /api/image/analyze - analyze
+- GET /api/image/:id - serve image (owner/privileged only)
 
-## 4. Incidents & inspections (`/api/incidents`)
+### Map (mapRoutes.ts)
+- GET /api/map/reports - reports for map
+- GET /api/map/incidents - incidents for map
+- GET /api/map/hotspots - hotspots
+- GET /api/map/clusters - clusters
+- GET /api/map/boundaries - boundaries
+- GET /api/map/jurisdiction - jurisdiction
+- GET /api/map/stats - stats
 
-| Method | Path | Auth | Permission | Description | Notes |
-|---|---|---|---|---|---|
-| GET | `/` | Yes | `incident.read` | List incidents | Scoped by role: citizen linked reports, officer/dept by assigned department, others per RBAC |
-| GET | `/:id` | Yes | `incident.read` | Incident detail + linked reports | `canAccessIncident`; citizen/analyst data shaping/PII minimization as implemented |
-| POST | `/from-cluster` | Yes | `incident.create` | Create incident from cluster | Validates cluster/report IDs exist |
-| POST | `/:id/review` | Yes | `incident.update` | Human review (confirm/dismiss) | Notes required/bounded; dept/assignment boundary and state guards |
-| POST | `/:id/assign` | Yes | `incident.assign` | Assign officer/department | Department isolation (esp. dept_officer), closed-state rejection, validation |
-| POST | `/:id/escalate` | Yes | `incident.escalate` | Escalate to critical priority | Reason required/bounded; access/state guards |
-| POST | `/:id/resolve` | Yes | `incident.resolve` | Resolve incident | Requires valid lifecycle state and action details; scoped |
-| GET | `/:id/inspections` | Yes | `inspection.read` | List inspections | Incident access required; analyst lacks `inspection.read` by RBAC |
-| POST | `/:id/inspection` | Yes | `inspection.create` | Submit field inspection | Officer/assignment/department/state checks, checklist/evidence validation |
-| POST | `/:id/verify-inspection` | Yes | `inspection.verify` | Approve/reject inspection | Dept boundary and incident/inspection/state validation |
+### Intelligence (intelligenceRoutes.ts)
+- GET /api/intelligence/agent - agent
+- GET /api/intelligence/clusters - clusters
+- GET /api/intelligence/hotspots - hotspots
+- GET /api/intelligence/trends - trends
+- GET /api/intelligence/model-metrics - model metrics
+- GET /api/intelligence/dataset-quality - dataset quality
+- GET /api/intelligence/semantic-evaluation - semantic eval
+- GET /api/intelligence/export-csv - CSV export
 
-## 5. Intelligence & analytics (`/api/intelligence`)
+### Geoanalytics (geoanalyticsRoutes.ts)
+- GET /api/geoanalytics/overview
+- GET /api/geoanalytics/state-distribution
+- GET /api/geoanalytics/district-distribution
+- GET /api/geoanalytics/locality-distribution
+- GET /api/geoanalytics/hotspots
+- GET /api/geoanalytics/resolution-time
+- GET /api/geoanalytics/pending-concentration
 
-| Method | Path | Auth | Permission | Description | Notes |
-|---|---|---|---|---|---|
-| POST | `/agent` | Yes | `intelligence.read` | Multi-tool intelligence query/briefing | Query required/bounded; scoped data; optional `specificTool` string |
-| GET | `/clusters` | Yes | `intelligence.read` | Spatio-temporal clusters | Computed over scoped reports |
-| GET | `/hotspots` | Yes | `intelligence.read` | Location hotspots/density | Scoped aggregation |
-| GET | `/trends` | Yes | `analytics.read` | Category/status/daily/incident trends | Scoped; authority permitted via `analytics.read` (confirmed) |
-| GET | `/model-metrics` | Yes | `model.evaluate` | Classifier evaluation metrics | Analyst/admin only; **authority denied (confirmed intended)** |
-| GET | `/dataset-quality` | Yes | `analytics.read` | Dataset quality signals | Heuristic/diagnostic, not certification |
-| GET | `/export-csv` | Yes | `data.export` | Export `reports` or `incidents` CSV | `type` must be `reports|incidents` if provided (invalid -> `400`); scoped; analyst report export omits citizen PII columns; CSV formula neutralization |
+### Misc (miscRoutes.ts)
+- GET /api/notifications - user notifications
+- POST /api/notifications/:id/read - mark read
+- POST /api/notifications/read-all - mark all read
+- GET /api/feedback - feedback list
+- POST /api/feedback - submit feedback
 
-## 6. Administration (`/api/admin`)
+### Verification (verificationRoutes.ts)
+- POST /api/verification/send-email
+- POST /api/verification/verify-email
+- POST /api/verification/send-sms
+- POST /api/verification/verify-sms
+- GET /api/verification/status
+- POST /api/verification/resend
 
-| Method | Path | Auth | Permission/Role | Description | Notes (Option B) |
-|---|---|---|---|---|---|
-| GET | `/users` | Yes | `user.read` | List users | Omits auth/session internals; **admin:** full directory incl. email/phone; **authority:** reduced (no email/phone) |
-| PUT | `/users/:id/role` | Yes | `admin.manage` | Change user role | Valid roles only; cannot change own role |
-| PUT | `/users/:id/status` | Yes | `admin.manage` | Activate/suspend user | Cannot suspend self |
-| GET | `/departments` | Yes | `user.read` | List departments | - |
-| GET | `/audit-logs` | Yes | `audit.read` | List audit logs | Omits `hash/prevHash/metadata`; returns `userEmail`, redacted `details`, masked `ipAddress`, `detailCode`; supports filters/limit (capped) |
-| GET | `/audit-verify` | Yes | `audit.read` | Verify audit chain integrity | Read-only result |
-| GET | `/system-stats` | Yes | role `authority` or `admin` | Runtime/system/db summary | No secrets; operational counts/memory |
+### India Civic (indiaCivicRoutes.ts)
+- GET /api/india-civic/schemes
+- GET /api/india-civic/escalation-path
+- GET /api/india-civic/jurisdiction/pincode
+- GET /api/india-civic/intelligence
+- GET /api/india-civic/ulb-types
+- GET /api/india-civic/ulb
 
-## 7. Miscellaneous (`/api`)
+### Database (databaseRoutes.ts)
+- GET /api/database/storage
+- GET /api/database/integrity
+- GET /api/database/health
 
-| Method | Path | Auth | Permission/Guard | Description | Notes |
-|---|---|---|---|---|---|
-| GET | `/health` | No | Public | Service/persistence/AI readiness status | Reports active/requested driver, Mongo status, `mongoRepositoryIntegrated` (currently false at runtime) |
-| GET | `/notifications` | Yes | `authenticate` | User notifications + unread count | Scoped to authenticated user |
-| PUT | `/notifications/:id/read` | Yes | `authenticate` | Mark notification read | Ownership/scoping enforced |
-| POST | `/notifications/read-all` | Yes | `authenticate` | Mark all read | - |
-| POST | `/feedback` | Yes | `authenticate` (+ validation/scoping) | Submit feedback | Rating 1–5; citizens restricted to own report/incident where applicable |
-| POST | `/seed` | Yes | Admin + dev opt-in + safety checks | Development seed | Disabled/locked in prod; refuses if persisted DB exists; not for production |
-| POST | `/tests/run` | Yes | Admin/dev gates but functionally disabled | In-process test runner | **Disabled** to prevent data mutation; use isolated scripts/CI |
+### IP Logs (iplogRoutes.ts)
+- GET /api/iplog
+- GET /api/iplog/:id
+- POST /api/iplog
+- DELETE /api/iplog (retention)
 
-## 8. Error/status summary
+### Location (locationRoutes.ts)
+- GET /api/location/states
+- GET /api/location/districts/:stateId
+- GET /api/location/subdistricts/:districtId
+- GET /api/location/blocks/:subDistrictId
+- GET /api/location/localities/:blockId
 
-| Status | Meaning (typical) |
-|---|---|
-| 200/201 | Success / created |
-| 204 | CORS preflight |
-| 400 | Validation/input/state error |
-| 401 | Unauthenticated, invalid/expired/revoked token |
-| 403 | Forbidden (RBAC, scope, suspension/reset, dev-gate denial) |
-| 404 | Resource or API route not found / gated dev endpoint unavailable |
-| 409 | Conflict/safety refusal (e.g. seed refused) |
-| 429 | Rate limited |
-| 500 | Server error (message redacted in production) |
+## Total Endpoints: 130
 
-## 9. Evidence and limitations
+## Security
+- Bearer token via Clerk SDK
+- requirePermission middleware per endpoint
+- canAccessReport for ownership
+- Rate limiting (300 req/15min unauth, 60 auth)
+- CSP headers
+- Upload: 10MB limit, base64 data URL
+- Image GET: owner/privileged only
 
-- **Isolated validation:** 361 assertions passed (46 smoke + 315 HTTP) covering representative auth/RBAC/scoping/validation/hardening cases; not an exhaustive role×endpoint×state matrix.
-- **Runtime:** JSON persistence active; Mongo repository not runtime-integrated/cut over.
-- **Production certification:** not provided by this document.
+## Error Format
+All errors return: { success: false, message: string, errors: string[] }
+EOF

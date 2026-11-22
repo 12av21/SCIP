@@ -7,11 +7,20 @@ and explainable risk scoring for municipal community observations.
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
 import math
 import re
+import logging
 from datetime import datetime
+
+logger = logging.getLogger("scip-ai")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s [scip-ai] %(levelname)s: %(message)s"))
+    logger.addHandler(_handler)
 
 # Optional sentence-transformers for semantic embeddings
 try:
@@ -68,6 +77,34 @@ app = FastAPI(
     description="Dedicated machine learning and NLP engine for municipal community intelligence.",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    logger.info("SCIP AI microservice starting (version=1.0.0, sentence_transformers_available=%s)", _ST_AVAILABLE)
+
+
+@app.middleware("http")
+async def _log_requests(request: Request, call_next):
+    import time as _time
+    start = _time.time()
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # pragma: no cover - safety net
+        logger.exception("Unhandled error processing request %s %s", request.method, request.url.path)
+        raise
+    duration_ms = int((_time.time() - start) * 1000)
+    logger.info("%s %s -> %s (%dms)", request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
+
+@app.exception_handler(Exception)
+async def _generic_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error.", "service": "scip-ai"},
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,13 +208,27 @@ class SemanticSimilarityResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
+    """Service health endpoint. Does not load models or perform inference."""
     return {
         "status": "healthy",
-        "service": "SCIP Python AI Microservice",
+        "service": "scip-ai",
+        "version": "1.0.0",
         "engine": "TF-IDF / Centroid Classifier / Geospatial Harversine",
         "sentence_transformers_available": _ST_AVAILABLE,
         "embedding_model": _embedding_model_id if _ST_AVAILABLE else None,
         "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/ready")
+def readiness_check():
+    """Readiness endpoint. The service is ready without preloading any ML models."""
+    return {
+        "status": "ready",
+        "service": "scip-ai",
+        "version": "1.0.0",
+        "sentence_transformers_available": _ST_AVAILABLE,
+        "embedding_model_loaded": _embedding_model is not None
     }
 
 @app.post("/classify", response_model=ClassifyResponse)

@@ -71,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Mobile Header */}
         <div className="lg:hidden h-16 flex items-center justify-between px-4 border-b border-slate-200">
           <div className="font-semibold text-slate-900 text-sm">Navigation Menu</div>
-          <button onClick={onCloseMobile} className="p-1 text-slate-500 hover:text-slate-800">
+          <button onClick={onCloseMobile} className="p-1 text-slate-500 hover:text-slate-800" aria-label="Close navigation menu">
             <X className="w-5 h-5" />
           </button>
         </div>

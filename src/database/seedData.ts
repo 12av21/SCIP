@@ -65,17 +65,27 @@ export const SEED_DEPARTMENTS: Department[] = [
   }
 ];
 
-// Pre-hashed bcrypt for 'AdminPass123!', 'DirectorPass123!', 'OfficerPass123!', 'CitizenPass123!'
-// $2a$10$w6D4T8fW... or stored hashes
+// SECURITY: Pre-hashed bcrypt credentials only. No plaintext passwords are stored
+// in source code. These accounts are development-only and are never created in
+// production: seedDatabase() throws when a persisted database already exists, and
+// the /api/database/seed endpoint requires ENABLE_DEV_SEED=true, non-production,
+// and admin authentication.
+//
+// Account passwords are set during initial provisioning and are not recoverable
+// from this file. To rotate a dev account password, use /api/auth/change-password
+// or delete the persisted DB and re-seed in a non-production environment.
 export const SEED_USERS: User[] = [
   {
     id: 'USR-ADMIN-01',
     name: 'Adarsh Verma',
     email: 'admin@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AdminPass123!
+    passwordHash: '$2b$10$JKkcrNBnUIU1WhPIpjWKw.7H9cEalFzo.vz/3RshMt6IOMa6SsXnu',
     role: 'admin',
     phone: '+91-98765-43210',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z'
   },
@@ -83,10 +93,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-AUTH-01',
     name: 'Dr. Rajesh Gupta',
     email: 'director@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DirectorPass123!
+    passwordHash: '$2b$10$ANn7CXYwn5m6LglB/dxehe5QpcXtuSjiJ1qCuigNxZ6GZeO4H7Zsa',
     role: 'authority',
     phone: '+91-98765-43211',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-05T09:30:00.000Z',
     updatedAt: '2026-01-05T09:30:00.000Z'
   },
@@ -94,12 +107,15 @@ export const SEED_USERS: User[] = [
     id: 'USR-DEPT-01',
     name: 'Er. Sunita Patel',
     email: 'dept.patel@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // DeptPass123!
+    passwordHash: '$2b$10$rp3yDtPMZRM3Lw8ufEqRquc5EPMTDg66fcZJZpOiwTZ1SxBLxrJRu',
     role: 'dept_officer',
     departmentId: 'DEP-WTR',
     departmentName: 'Water & Sewerage Authority',
     phone: '+91-98765-43213',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:30:00.000Z',
     updatedAt: '2026-01-10T11:30:00.000Z'
   },
@@ -107,12 +123,15 @@ export const SEED_USERS: User[] = [
     id: 'USR-OFF-01',
     name: 'Vikram Sharma',
     email: 'officer.sharma@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // OfficerPass123!
+    passwordHash: '$2b$10$Cv36.sOU3AN6Zog3qcbzTuDvx8hqqEq7/C7hgiWJ8KtmN1OfvnPcm',
     role: 'officer',
     departmentId: 'DEP-ROADS',
     departmentName: 'Public Works & Roads Infrastructure',
     phone: '+91-98765-43212',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-10T11:00:00.000Z',
     updatedAt: '2026-01-10T11:00:00.000Z'
   },
@@ -120,10 +139,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-ANL-01',
     name: 'Dr. Kavita Rao',
     email: 'analyst.rao@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // AnalystPass123!
+    passwordHash: '$2b$10$43Pv14ENeSDrOqwNXAprlenxx2tz3LDYZVYzxidT3ks5HZtiRJKMW',
     role: 'analyst',
     phone: '+91-98765-43230',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-01-12T10:00:00.000Z',
     updatedAt: '2026-01-12T10:00:00.000Z'
   },
@@ -131,10 +153,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-01',
     name: 'Priya Sharma',
     email: 'citizen.jane@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$MRhFQnX7aAgdHxNPLln4uu8xgc9CdjtAL/NXR6slmwTnylCFgJNYW',
     role: 'citizen',
     phone: '+91-98765-43220',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-01T14:15:00.000Z',
     updatedAt: '2026-02-01T14:15:00.000Z'
   },
@@ -142,10 +167,13 @@ export const SEED_USERS: User[] = [
     id: 'USR-CIT-02',
     name: 'Rahul Mehta',
     email: 'citizen.rahul@scip.gov',
-    passwordHash: '$2a$10$w1qZ3PjG2h1bFfLdJtT7UOPV2yR6j0K8u6C7vL2bZ4xPq6c7s9A2m', // CitizenPass123!
+    passwordHash: '$2b$10$t8Zz7t8VehFFqUeGMkgsge7pr/Cy9/qaH2ruyZ71G4exaGbo91hk2',
     role: 'citizen',
     phone: '+91-98765-43221',
     status: 'active',
+    emailVerified: true,
+    phoneVerified: true,
+    verificationAttempts: 0,
     createdAt: '2026-02-03T16:00:00.000Z',
     updatedAt: '2026-02-03T16:00:00.000Z'
   }
@@ -503,31 +531,49 @@ export const SEED_NOTIFICATIONS: Notification[] = [
   {
     id: 'NOTIF-01',
     userId: 'USR-CIT-01',
+    eventType: 'report_status_changed',
     title: 'Report Analyzed',
     message: 'Your report REP-2026-001 (Water accumulation) was analyzed by SCIP and linked to Potential Incident INC-2026-001.',
-    type: 'report_status',
+    channels: ['in_app'],
+    priority: 'medium',
     read: false,
-    link: 'REP-2026-001',
+    emailSent: false,
+    smsSent: false,
+    pushSent: false,
+    relatedEntityId: 'REP-2026-001',
+    relatedEntityType: 'report',
     createdAt: '2026-10-03T07:25:00.000Z'
   },
   {
     id: 'NOTIF-02',
     userId: 'USR-AUTH-01',
+    eventType: 'incident_created',
     title: 'New Potential Incident Detected',
     message: 'SCIP Intelligence Agent detected Potential Incident INC-2026-001 (Drainage Failure at Sector 4 Market) with 4 linked observations.',
-    type: 'incident_alert',
+    channels: ['in_app', 'email'],
+    priority: 'high',
     read: false,
-    link: 'INC-2026-001',
+    emailSent: false,
+    smsSent: false,
+    pushSent: false,
+    relatedEntityId: 'INC-2026-001',
+    relatedEntityType: 'incident',
     createdAt: '2026-10-03T08:45:00.000Z'
   },
   {
     id: 'NOTIF-03',
     userId: 'USR-OFF-01',
+    eventType: 'incident_assigned',
     title: 'Incident Assigned',
     message: 'You have been assigned to investigate and coordinate Incident INC-2026-002 on West Boulevard.',
-    type: 'assignment',
+    channels: ['in_app', 'email', 'sms'],
+    priority: 'high',
     read: true,
-    link: 'INC-2026-002',
+    emailSent: true,
+    smsSent: true,
+    pushSent: false,
+    relatedEntityId: 'INC-2026-002',
+    relatedEntityType: 'incident',
     createdAt: '2026-10-02T19:30:00.000Z'
   }
 ];

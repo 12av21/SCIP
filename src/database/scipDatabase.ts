@@ -33,7 +33,16 @@ import {
   IPSecurityLog,
   AuthEventType,
   ComplaintLocation,
-  LocationSource
+  LocationSource,
+  ClerkIdentityLink,
+  ClerkLinkVerificationMethod,
+  NotificationTemplate,
+  NotificationPreference,
+  NotificationEventType,
+  NotificationChannel,
+  NotificationPriority,
+  NotificationFilters,
+  NotificationStats
 } from '../types/scip.js';
 import {
   SEED_DEPARTMENTS,
@@ -55,8 +64,19 @@ import { globalVectorizer } from '../ai/tfidf.js';
 import { findSimilarAndDuplicateReports } from '../ai/duplicateDetector.js';
 import { detectIncidentClusters } from '../ai/incidentClustering.js';
 import { computeExplainableRisk } from '../ai/riskScorer.js';
+import { aiAdapter } from '../ai/aiServiceAdapter.js';
 import { datasetManager } from '../ai/datasetManager.js';
 import { modelRegistry } from '../ai/modelRegistry.js';
+import { DuplicateClerkIdentityError } from './identityErrors.js';
+import {
+  isHiddenReport,
+  isHiddenIncident,
+  isHiddenUser,
+  isHiddenNotification,
+  isHiddenInspection,
+  isSeedAuditLog,
+  isHiddenFeedback
+} from './dataIsolation.js';
 
 const DEFAULT_STORAGE_FILE = path.resolve(process.cwd(), '.scip_database.json');
 
@@ -64,12 +84,15 @@ export class SCIPDatabase {
   private users: Map<string, User> = new Map();
   private departments: Map<string, Department> = new Map();
   private reports: Map<string, Report> = new Map();
+  private reportIdCounter = 0;
   private incidents: Map<string, Incident> = new Map();
   private analyses: Map<string, AIAnalysis> = new Map();
   private assignments: Map<string, Assignment> = new Map();
   private resolutions: Map<string, Resolution> = new Map();
   private inspections: Map<string, InspectionRecord> = new Map();
   private notifications: Notification[] = [];
+  private notificationPreferences: Map<string, NotificationPreference> = new Map();
+  private notificationTemplates: Map<string, NotificationTemplate> = new Map();
   private feedbacks: Feedback[] = [];
   private auditLogs: AuditLog[] = [];
   private riskScores: Map<string, RiskScore> = new Map();
@@ -80,7 +103,9 @@ export class SCIPDatabase {
   private adminLocalities: Map<string, AdminLocality> = new Map();
   private administrativeBoundaries: Map<string, AdministrativeBoundary> = new Map();
   private ipSecurityLogs: IPSecurityLog[] = [];
+  private clerkLinks: Map<string, ClerkIdentityLink> = new Map();
   private isPersistedToDisk: boolean = false;
+  private loadedFromPersistedState: boolean = false;
   private storageFile: string;
 
   constructor(storageFile?: string) {
@@ -107,11 +132,15 @@ export class SCIPDatabase {
           (data.resolutions || []).forEach((res: Resolution) => this.resolutions.set(res.id, res));
           (data.inspections || []).forEach((insp: InspectionRecord) => this.inspections.set(insp.id, insp));
           this.notifications = data.notifications || [];
+          (data.notificationPreferences || []).forEach((p: NotificationPreference) => this.notificationPreferences.set(p.userId, p));
+          (data.notificationTemplates || []).forEach((t: NotificationTemplate) => this.notificationTemplates.set(t.id, t));
           this.feedbacks = data.feedbacks || [];
           this.auditLogs = data.auditLogs || [];
           this.ipSecurityLogs = data.ipSecurityLogs || [];
+          (data.clerkLinks || []).forEach((l: ClerkIdentityLink) => this.clerkLinks.set(l.id, l));
           // Security: do not rewrite historical audit records on load. Verification is a separate operation.
           this.isPersistedToDisk = true;
+          this.loadedFromPersistedState = true;
 
           // Load administrative location data from persisted storage (additive; does not overwrite existing)
           (data.adminStates || []).forEach((s: AdminState) => this.adminStates.set(s.id, s));
@@ -177,7 +206,7 @@ export class SCIPDatabase {
     }
   }
 
-  public persist(): void {
+public persist(): void {
     try {
       const payload = {
         users: Array.from(this.users.values()),
@@ -189,9 +218,12 @@ export class SCIPDatabase {
         resolutions: Array.from(this.resolutions.values()),
         inspections: Array.from(this.inspections.values()),
         notifications: this.notifications,
+        notificationPreferences: Array.from(this.notificationPreferences.values()),
+        notificationTemplates: Array.from(this.notificationTemplates.values()),
         feedbacks: this.feedbacks,
         auditLogs: this.auditLogs,
         ipSecurityLogs: this.ipSecurityLogs,
+        clerkLinks: Array.from(this.clerkLinks.values()),
         adminStates: Array.from(this.adminStates.values()),
         adminDistricts: Array.from(this.adminDistricts.values()),
         adminSubDistricts: Array.from(this.adminSubDistricts.values()),
@@ -368,6 +400,82 @@ export class SCIPDatabase {
     SEED_INCIDENTS.forEach(i => this.incidents.set(i.id, { ...i }));
     SEED_INSPECTIONS.forEach(i => this.inspections.set(i.id, { ...i }));
 
+    // Initialize default notification templates
+    const defaultTemplates: NotificationTemplate[] = [
+      {
+        id: 'tmpl_incident_created',
+        eventType: 'incident_created',
+        name: 'Incident Created',
+        description: 'Sent when a new incident is created from reports',
+        channels: ['in_app', 'email'],
+        subject: 'New Incident Created: {{incidentId}}',
+        emailTemplate: `
+          <h2>New Incident Created</h2>
+          <p>An incident has been created from citizen reports.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Location:</strong> {{location}}</p>
+          <p><strong>Priority:</strong> {{priority}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">View Incident</a></p>
+        `,
+        smsTemplate: 'SCIP Alert: New incident {{incidentId}} created ({{category}}) at {{location}}. Priority: {{priority}}',
+        inAppTemplate: 'New incident {{incidentId}} created ({{category}}) at {{location}}',
+        priority: 'high',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tmpl_incident_assigned',
+        eventType: 'incident_assigned',
+        name: 'Incident Assigned',
+        description: 'Sent when an incident is assigned to a field officer or department',
+        channels: ['in_app', 'email', 'sms'],
+        subject: 'Incident Assigned: {{incidentId}}',
+        emailTemplate: `
+          <h2>Incident Assigned to You</h2>
+          <p>You have been assigned to handle an incident.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Location:</strong> {{location}}</p>
+          <p><strong>Priority:</strong> {{priority}}</p>
+          <p><strong>SLA Deadline:</strong> {{slaDeadline}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">View Incident</a></p>
+        `,
+        smsTemplate: 'SCIP: Incident {{incidentId}} assigned to you. {{category}} at {{location}}. Priority: {{priority}}. SLA: {{slaDeadline}}',
+        inAppTemplate: 'Incident {{incidentId}} assigned to you ({{category}}, {{priority}})',
+        priority: 'high',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tmpl_incident_sla_breach',
+        eventType: 'incident_sla_breach',
+        name: 'SLA Breach Alert',
+        description: 'Sent when an incident SLA deadline is breached or at risk',
+        channels: ['in_app', 'email', 'sms'],
+        subject: 'SLA BREACH: Incident {{incidentId}}',
+        emailTemplate: `
+          <h2 style="color: #dc2626;">SLA BREACH ALERT</h2>
+          <p>An incident has breached or is at risk of breaching its SLA deadline.</p>
+          <p><strong>Incident ID:</strong> {{incidentId}}</p>
+          <p><strong>Category:</strong> {{category}}</p>
+          <p><strong>Assigned To:</strong> {{assignedTo}}</p>
+          <p><strong>SLA Deadline:</strong> {{slaDeadline}}</p>
+          <p><strong>Time Overdue:</strong> {{timeOverdue}}</p>
+          <p><a href="{{appUrl}}/incidents/{{incidentId}}">Take Action Now</a></p>
+        `,
+        smsTemplate: 'SCIP SLA ALERT: Incident {{incidentId}} SLA breached. {{timeOverdue}} overdue. Assigned to {{assignedTo}}',
+        inAppTemplate: 'SLA BREACH: Incident {{incidentId}} - {{timeOverdue}} overdue',
+        priority: 'critical',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+    defaultTemplates.forEach(t => this.notificationTemplates.set(t.id, t));
+
     // Populate seed audit logs with hash chain
     SEED_AUDIT_LOGS.forEach(l => {
       this.logAudit({
@@ -456,7 +564,7 @@ export class SCIPDatabase {
   }
 
   public getAuditLogs(filters?: { module?: string; action?: string; userId?: string }): AuditLog[] {
-    let logs = [...this.auditLogs];
+    let logs = this.loadedFromPersistedState ? [...this.auditLogs].filter(l => !isSeedAuditLog(l)) : [...this.auditLogs];
     if (filters?.module) logs = logs.filter(l => l.module === filters.module);
     if (filters?.action) logs = logs.filter(l => l.action === filters.action);
     if (filters?.userId) logs = logs.filter(l => l.userId === filters.userId);
@@ -465,10 +573,32 @@ export class SCIPDatabase {
 
   // --- Users & Auth ---
   public getUsers(): User[] {
-    return Array.from(this.users.values()).map(u => {
-      const { passwordHash, ...safeUser } = u;
-      return safeUser as User;
-    });
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
+  }
+
+  public findUsersByDepartment(departmentId: string): User[] {
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .filter(u => u.departmentId === departmentId)
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
+  }
+
+  public findUsersByRole(role: UserRole): User[] {
+    return Array.from(this.users.values())
+      .filter(u => !(this.loadedFromPersistedState && isHiddenUser(u)))
+      .filter(u => u.role === role)
+      .map(u => {
+        const { passwordHash, ...safeUser } = u;
+        return safeUser as User;
+      });
   }
 
   public getUserById(id: string): User | undefined {
@@ -484,10 +614,39 @@ export class SCIPDatabase {
     );
   }
 
+  /**
+   * Resolve a SCIP user by Clerk identity (Phase 3.1.2A hardening).
+   * - Rejects empty/undefined/null identity input (deterministic not-found).
+   * - Detects duplicate identity records and fails closed instead of returning
+   *   the first match.
+   * - Returns the full user record (including status/role) so the middleware can
+   *   enforce suspension and authorization.
+   */
+  public getUserByClerkId(clerkUserId: string): User | undefined {
+    if (typeof clerkUserId !== 'string' || clerkUserId.trim().length === 0) {
+      return undefined;
+    }
+    const matches = Array.from(this.users.values()).filter(u => u.clerkUserId === clerkUserId);
+    if (matches.length === 0) return undefined;
+    if (matches.length > 1) {
+      throw new DuplicateClerkIdentityError();
+    }
+    return matches[0];
+  }
+
   public createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): User {
     const existing = this.getUserByEmailWithPassword(userData.email);
     if (existing) {
       throw new Error(`Email ${userData.email} is already registered.`);
+    }
+
+    // Phase 3.1.2A: enforce one Clerk identity per SCIP user at creation time.
+    const requestedClerkId = (userData as any).clerkUserId;
+    if (typeof requestedClerkId === 'string' && requestedClerkId.trim().length > 0) {
+      const clash = Array.from(this.users.values()).some(u => u.clerkUserId === requestedClerkId);
+      if (clash) {
+        throw new DuplicateClerkIdentityError();
+      }
     }
 
     const id = `USR-${Date.now().toString().slice(-6)}`;
@@ -496,10 +655,17 @@ export class SCIPDatabase {
       ...userData,
       sessionVersion: (userData as any).sessionVersion ?? 0,
       credentialsResetRequired: Boolean((userData as any).credentialsResetRequired),
+      emailVerified: Boolean((userData as any).emailVerified),
+      phoneVerified: Boolean((userData as any).phoneVerified),
+      verificationAttempts: (userData as any).verificationAttempts ?? 0,
       id,
       createdAt: now,
       updatedAt: now
     };
+    // Normalize: never persist an empty/whitespace clerkUserId (equivalent to unlinked).
+    if (typeof newUser.clerkUserId !== 'string' || newUser.clerkUserId.trim().length === 0) {
+      delete newUser.clerkUserId;
+    }
 
     this.users.set(id, newUser);
 
@@ -518,6 +684,271 @@ export class SCIPDatabase {
 
     const { passwordHash, ...safe } = newUser;
     return safe as User;
+  }
+
+  /**
+   * Secure citizen onboarding for a verified Clerk identity that has no existing
+   * SCIP account. Creates exactly one new citizen profile, links the Clerk
+   * subject, and never escalates role. Caller (route) must enforce that the
+   * Clerk identity is verified and that no existing SCIP account already matches.
+   */
+  public createClerkCitizen(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    clerkSubject: string;
+    residenceAddress?: string;
+  }): User {
+    const safeName = String(input.name || '').trim();
+    const safeEmail = String(input.email || '').toLowerCase().trim();
+    if (!safeName) throw new Error('Name is required.');
+    if (!safeEmail) throw new Error('Email is required.');
+    if (safeName.length > 100) throw new Error('Name must be 100 characters or fewer.');
+    if (safeEmail.length > 254) throw new Error('Email must be 254 characters or fewer.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) throw new Error('Invalid email format.');
+    if (typeof input.clerkSubject !== 'string' || input.clerkSubject.trim().length === 0) {
+      throw new Error('Clerk identity is required.');
+    }
+    if (input.phone !== undefined && (typeof input.phone !== 'string' || input.phone.trim().length > 30)) {
+      throw new Error('Phone must be 30 characters or fewer.');
+    }
+
+    // Deterministic duplicate guards: no existing SCIP account may match this
+    // email or Clerk identity. Never silently overwrite or merge.
+    const existingEmail = this.getUserByEmailWithPassword(safeEmail);
+    if (existingEmail) throw new Error(`Email ${safeEmail} is already registered.`);
+    const existingClerk = this.getUserByClerkId(input.clerkSubject);
+    if (existingClerk) throw new Error('Clerk identity is already linked to a SCIP account.');
+
+    const id = `USR-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+    const now = new Date().toISOString();
+    const newUser: User = {
+      id,
+      name: safeName,
+      email: safeEmail,
+      role: 'citizen',
+      phone: input.phone ? input.phone.trim() : undefined,
+      clerkUserId: input.clerkSubject,
+      status: 'active',
+      sessionVersion: 0,
+      credentialsResetRequired: false,
+      emailVerified: true,
+      phoneVerified: Boolean(input.phone && input.phone.trim().length > 0),
+      verificationAttempts: 0,
+      residenceAddress: typeof input.residenceAddress === 'string' ? input.residenceAddress.trim().slice(0, 500) : undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.users.set(id, newUser);
+
+    this.logAudit({
+      action: 'USER_CREATED',
+      module: 'auth',
+      recordId: id,
+      userId: id,
+      userEmail: newUser.email,
+      userRole: newUser.role,
+      ipAddress: '127.0.0.1',
+      details: `New citizen created via Clerk onboarding (clerkSubject=${input.clerkSubject})`
+    });
+
+    this.persist();
+
+    const { passwordHash, ...safe } = newUser;
+    return safe as User;
+  }
+
+  // ==========================================================================
+  // Clerk Identity Linking (Phase 3.1.3)
+  // ==========================================================================
+
+  /**
+   * Atomic conditional link. Sets clerkUserId only if the target user exists, is
+   * currently unlinked, and no other user holds this Clerk identity.
+   * Single-process JSON engine: the check-then-set is synchronous (no await
+   * between check and write) so it is atomic within the Node event loop.
+   * Multi-process atomicity is NOT guaranteed by the JSON engine (documented
+   * limitation; single-process constraint enforced operationally).
+   */
+  public linkClerkIdentity(scipUserId: string, clerkSubject: string): { linked: boolean; reason?: string } {
+    if (typeof clerkSubject !== 'string' || clerkSubject.trim().length === 0) {
+      return { linked: false, reason: 'invalid_identity' };
+    }
+    const user = this.users.get(scipUserId);
+    if (!user) return { linked: false, reason: 'user_not_found' };
+    if (typeof user.clerkUserId === 'string' && user.clerkUserId.trim().length > 0) {
+      return { linked: false, reason: 'already_linked' };
+    }
+    const clash = Array.from(this.users.values()).some(u => u.id !== scipUserId && u.clerkUserId === clerkSubject);
+    if (clash) return { linked: false, reason: 'identity_taken' };
+    user.clerkUserId = clerkSubject;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return { linked: true };
+  }
+
+  public createClerkLinkRequest(input: { scipUserId: string; clerkSubject: string; verificationMethod: ClerkLinkVerificationMethod; correlationId: string }): ClerkIdentityLink {
+    const user = this.users.get(input.scipUserId);
+    if (!user) throw new Error('User not found');
+    if (typeof user.clerkUserId === 'string' && user.clerkUserId.trim().length > 0) {
+      throw new Error('ALREADY_LINKED');
+    }
+    const existingForSubject = this.getClerkLinkBySubject(input.clerkSubject);
+    if (existingForSubject && (existingForSubject.status === 'PENDING_VERIFICATION' || existingForSubject.status === 'VERIFIED')) {
+      return existingForSubject; // idempotent: return the existing pending request
+    }
+    if (existingForSubject && existingForSubject.status === 'LINKED') {
+      throw new Error('IDENTITY_TAKEN');
+    }
+    const now = new Date();
+    const id = `LNK-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+    const link: ClerkIdentityLink = {
+      id,
+      scipUserId: input.scipUserId,
+      clerkSubject: input.clerkSubject,
+      status: 'PENDING_VERIFICATION',
+      verificationMethod: input.verificationMethod,
+      attemptCount: 0,
+      maxAttempts: 5,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+      correlationId: input.correlationId
+    };
+    this.clerkLinks.set(id, link);
+    this.persist();
+    return link;
+  }
+
+  public getClerkLinkById(id: string): ClerkIdentityLink | undefined {
+    return this.clerkLinks.get(id);
+  }
+
+  public getClerkLinkBySubject(clerkSubject: string): ClerkIdentityLink | undefined {
+    if (typeof clerkSubject !== 'string' || clerkSubject.trim().length === 0) return undefined;
+    const matches = Array.from(this.clerkLinks.values()).filter(l => l.clerkSubject === clerkSubject);
+    const active = matches.find(l => l.status === 'PENDING_VERIFICATION' || l.status === 'VERIFIED' || l.status === 'LINKED');
+    if (active) return active;
+    return matches.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
+  public getClerkLinksByScipUser(scipUserId: string): ClerkIdentityLink[] {
+    return Array.from(this.clerkLinks.values()).filter(l => l.scipUserId === scipUserId);
+  }
+
+  public listPendingClerkLinks(): ClerkIdentityLink[] {
+    return Array.from(this.clerkLinks.values()).filter(l => l.status === 'PENDING_VERIFICATION');
+  }
+
+  public setClerkLinkChallenge(id: string, challengeHash: string, challengeSalt: string, expiresAt: string, resendCooldownUntil: string): void {
+    const link = this.clerkLinks.get(id);
+    if (!link) return;
+    link.challengeHash = challengeHash;
+    link.challengeSalt = challengeSalt;
+    link.challengeExpiresAt = expiresAt;
+    link.resendCooldownUntil = resendCooldownUntil;
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public submitClerkLinkChallenge(id: string, otp: string): { verified: boolean; linked: boolean; reason?: string } {
+    const link = this.clerkLinks.get(id);
+    if (!link) return { verified: false, linked: false, reason: 'not_found' };
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') {
+      return { verified: false, linked: false, reason: 'invalid_state' };
+    }
+    if (link.challengeExpiresAt && new Date(link.challengeExpiresAt).getTime() < Date.now()) {
+      link.status = 'EXPIRED';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { verified: false, linked: false, reason: 'expired' };
+    }
+    if (link.attemptCount >= link.maxAttempts) {
+      link.status = 'REJECTED';
+      link.reason = 'max_attempts_exceeded';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { verified: false, linked: false, reason: 'max_attempts' };
+    }
+    const hash = crypto.createHash('sha256').update((link.challengeSalt || '') + otp).digest('hex');
+    const ok = hash === link.challengeHash;
+    link.attemptCount += 1;
+    link.updatedAt = new Date().toISOString();
+    if (!ok) {
+      if (link.attemptCount >= link.maxAttempts) {
+        link.status = 'REJECTED';
+        link.reason = 'max_attempts_exceeded';
+      }
+      this.persist();
+      return { verified: false, linked: false, reason: 'invalid_challenge' };
+    }
+    link.status = 'VERIFIED';
+    link.verifiedAt = new Date().toISOString();
+    const result = this.linkClerkIdentity(link.scipUserId, link.clerkSubject);
+    if (result.linked) {
+      link.status = 'LINKED';
+      link.linkedAt = new Date().toISOString();
+      this.persist();
+      return { verified: true, linked: true };
+    }
+    link.status = 'REJECTED';
+    link.reason = result.reason;
+    this.persist();
+    return { verified: true, linked: false, reason: result.reason };
+  }
+
+  public decideClerkLink(id: string, decision: 'approve' | 'reject', adminUser: User, reason: string): { linked: boolean; reason?: string } {
+    const link = this.clerkLinks.get(id);
+    if (!link) return { linked: false, reason: 'not_found' };
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') {
+      return { linked: false, reason: 'invalid_state' };
+    }
+    link.decidedBy = adminUser.id;
+    link.decidedAt = new Date().toISOString();
+    link.reason = reason;
+    if (decision === 'reject') {
+      link.status = 'REJECTED';
+      link.updatedAt = new Date().toISOString();
+      this.persist();
+      return { linked: false, reason: 'rejected' };
+    }
+    const result = this.linkClerkIdentity(link.scipUserId, link.clerkSubject);
+    if (result.linked) {
+      link.status = 'LINKED';
+      link.linkedAt = new Date().toISOString();
+      this.persist();
+      return { linked: true };
+    }
+    link.status = 'REJECTED';
+    link.reason = result.reason;
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+    return { linked: false, reason: result.reason };
+  }
+
+  public cancelClerkLink(id: string, clerkSubject: string): void {
+    const link = this.clerkLinks.get(id);
+    if (!link) return;
+    if (link.clerkSubject !== clerkSubject) return;
+    if (link.status !== 'PENDING_VERIFICATION' && link.status !== 'VERIFIED') return;
+    link.status = 'REVOKED';
+    link.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public expireStaleClerkLinks(): number {
+    const now = Date.now();
+    let count = 0;
+    for (const link of this.clerkLinks.values()) {
+      if ((link.status === 'PENDING_VERIFICATION' || link.status === 'VERIFIED') && new Date(link.expiresAt).getTime() < now) {
+        link.status = 'EXPIRED';
+        link.updatedAt = new Date().toISOString();
+        count++;
+      }
+    }
+    if (count > 0) this.persist();
+    return count;
   }
 
   public updateUserRole(userId: string, newRole: UserRole, adminUser: User): User {
@@ -634,6 +1065,98 @@ export class SCIPDatabase {
     return safe as User;
   }
 
+  // --- Email & SMS Verification (Phase: Verification Enhancement) ---
+
+  public setUserEmailVerificationToken(userId: string, tokenHash: string, expiresAt: string): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    user.emailVerificationTokenHash = tokenHash;
+    user.emailVerificationTokenExpiresAt = expiresAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public setUserPhoneVerificationOtp(userId: string, otpHash: string, expiresAt: string): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    user.phoneVerificationOtpHash = otpHash;
+    user.phoneVerificationOtpExpiresAt = expiresAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public verifyUserEmail(userId: string, token: string): boolean {
+    const user = this.users.get(userId);
+    if (!user) return false;
+    if (!user.emailVerificationTokenHash || !user.emailVerificationTokenExpiresAt) return false;
+    if (new Date(user.emailVerificationTokenExpiresAt) < new Date()) return false; // expired
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    if (tokenHash !== user.emailVerificationTokenHash) return false; // invalid token
+    user.emailVerified = true;
+    user.emailVerificationTokenHash = undefined;
+    user.emailVerificationTokenExpiresAt = undefined;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  public verifyUserPhone(userId: string, otp: string): boolean {
+    const user = this.users.get(userId);
+    if (!user) return false;
+    if (!user.phoneVerificationOtpHash || !user.phoneVerificationOtpExpiresAt) return false;
+    if (new Date(user.phoneVerificationOtpExpiresAt) < new Date()) return false; // expired
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    if (otpHash !== user.phoneVerificationOtpHash) return false; // invalid OTP
+    user.phoneVerified = true;
+    user.phoneVerificationOtpHash = undefined;
+    user.phoneVerificationOtpExpiresAt = undefined;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  public getUserVerificationStatus(userId: string): { emailVerified: boolean; phoneVerified: boolean; emailVerificationTokenExpiresAt?: string; phoneVerificationOtpExpiresAt?: string; verificationAttempts: number; lastVerificationSentAt?: string } | undefined {
+    const user = this.users.get(userId);
+    if (!user) return undefined;
+    return {
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified,
+      emailVerificationTokenExpiresAt: user.emailVerificationTokenExpiresAt,
+      phoneVerificationOtpExpiresAt: user.phoneVerificationOtpExpiresAt,
+      verificationAttempts: user.verificationAttempts,
+      lastVerificationSentAt: user.lastVerificationSentAt
+    };
+  }
+
+  public incrementVerificationAttempts(userId: string): void {
+    const user = this.users.get(userId);
+    if (!user) return;
+    user.verificationAttempts = (user.verificationAttempts ?? 0) + 1;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public resetVerificationAttempts(userId: string): void {
+    const user = this.users.get(userId);
+    if (!user) return;
+    user.verificationAttempts = 0;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
+  public updateUserVerificationStatus(userId: string, updates: { emailVerified?: boolean; phoneVerified?: boolean; verificationAttempts?: number; lastVerificationSentAt?: string }): void {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    if (updates.emailVerified !== undefined) user.emailVerified = updates.emailVerified;
+    if (updates.phoneVerified !== undefined) user.phoneVerified = updates.phoneVerified;
+    if (updates.verificationAttempts !== undefined) user.verificationAttempts = updates.verificationAttempts;
+    if (updates.lastVerificationSentAt !== undefined) user.lastVerificationSentAt = updates.lastVerificationSentAt;
+    user.updatedAt = new Date().toISOString();
+    this.persist();
+  }
+
   // --- Data Deletion / Right to be Forgotten (Phase 3 / DPDP Act 2023) ---
 
   public deleteUser(userId: string, requestingUser: User): User {
@@ -698,7 +1221,7 @@ export class SCIPDatabase {
     status?: string;
     urgency?: string;
   }): Report[] {
-    let list = Array.from(this.reports.values());
+    let list = Array.from(this.reports.values()).filter(r => !(this.loadedFromPersistedState && isHiddenReport(r)));
     if (filter?.citizenId) list = list.filter(r => r.citizenId === filter.citizenId);
     if (filter?.category) list = list.filter(r => r.category === filter.category);
     if (filter?.status) list = list.filter(r => r.status === filter.status);
@@ -724,11 +1247,11 @@ export class SCIPDatabase {
     return updated;
   }
 
-  public createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): {
+  public async createReport(reportInput: Omit<Report, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<{
     report: Report;
     analysis: AIAnalysis;
-  } {
-    const id = `REP-${new Date().getFullYear()}-${String(this.reports.size + 1).padStart(3, '0')}`;
+  }> {
+    const id = `REP-${new Date().getFullYear()}-${String(++this.reportIdCounter).padStart(3, '0')}`;
     const now = new Date().toISOString();
 
     const report: Report = {
@@ -741,15 +1264,14 @@ export class SCIPDatabase {
 
     this.reports.set(id, report);
 
-    // Update TF-IDF corpus
-    const docs = Array.from(this.reports.values()).map(r => ({
-      id: r.id,
-      text: `${r.title} ${r.description} ${r.category} ${r.locationName}`
-    }));
-    globalVectorizer.fit(docs);
+    // Update TF-IDF corpus incrementally (avoid O(N) full-corpus refit on every report creation)
+    globalVectorizer.addDocument({
+      id,
+      text: `${report.title} ${report.description} ${report.category} ${report.locationName}`
+    });
 
     // Perform AI analysis
-    const analysis = this.runAndStoreAIAnalysis(report, true);
+    const analysis = await this.runAndStoreAIAnalysis(report, true);
 
     // Record audit event
     this.logAudit({
@@ -766,10 +1288,14 @@ export class SCIPDatabase {
     // Notify citizen
     this.createNotification({
       userId: report.citizenId,
+      eventType: 'report_submitted',
       title: 'Report Received & Analyzed',
       message: `Your report ${id} was logged. AI identified category as "${analysis.categoryPredicted}" (${(analysis.categoryConfidence * 100).toFixed(0)}% confidence).`,
-      type: 'report_status',
-      link: id
+      channels: ['in_app'],
+      priority: 'medium',
+      data: { reportId: id, category: analysis.categoryPredicted },
+      relatedEntityId: id,
+      relatedEntityType: 'report'
     });
 
     this.persist();
@@ -889,17 +1415,21 @@ export class SCIPDatabase {
 
     this.createNotification({
       userId: report.citizenId,
+      eventType: 'report_status_changed',
       title: 'Report Withdrawn',
       message: `Your report ${id} has been marked as withdrawn/closed.`,
-      type: 'report_status',
-      link: id
+      channels: ['in_app'],
+      priority: 'medium',
+      data: { reportId: id, newStatus: 'withdrawn' },
+      relatedEntityId: id,
+      relatedEntityType: 'report'
     });
 
     this.persist();
     return report;
   }
 
-  public runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): AIAnalysis {
+  public async runAndStoreAIAnalysis(report: Report, recordAudit: boolean = true): Promise<AIAnalysis> {
     const allReports = Array.from(this.reports.values());
     const text = `${report.title} ${report.description} ${report.locationName}`;
 
@@ -918,8 +1448,18 @@ export class SCIPDatabase {
       // Dataset/model registry is additive; do not fail analysis if unavailable
     }
 
-    // 1. Classification (using selected model from registry)
-    const classResult = classifyReport(text, report.category);
+    // 1. Classification (Python AI service when enabled, local TS fallback)
+    let classResult: { predictedCategory: ReportCategory; confidence: number };
+    if (aiAdapter.isServiceEnabled()) {
+      try {
+        const adapterResult = await aiAdapter.classify(text, report.category);
+        classResult = { predictedCategory: adapterResult.predictedCategory, confidence: adapterResult.confidence };
+      } catch {
+        classResult = classifyReport(text, report.category);
+      }
+    } else {
+      classResult = classifyReport(text, report.category);
+    }
 
     // Build model selection evidence
     const modelEvidence: string[] = [];
@@ -938,9 +1478,11 @@ export class SCIPDatabase {
     // 2. Entity Extraction
     const entities = extractEntities(text);
 
-    // 3. Duplicate Detection & Similar Reports
-    const { topSimilar, duplicateProbability, evidence: dupEvidence } =
-      findSimilarAndDuplicateReports(report, allReports);
+    // 3. Duplicate Detection & Similar Reports (canonical shape from either engine)
+    const dupResult = await aiAdapter.checkDuplicates(report, allReports);
+    const topSimilar: ReturnType<typeof findSimilarAndDuplicateReports>['topSimilar'] = dupResult.topSimilar;
+    const duplicateProbability = dupResult.duplicateProbability;
+    const dupEvidence = dupResult.evidence;
 
     // 4. Incident Clustering Check
     const clusters = detectIncidentClusters(allReports);
@@ -953,7 +1495,9 @@ export class SCIPDatabase {
       entityId: report.id,
       reports: [report],
       locationName: report.locationName,
-      isRecurrentHotspot: report.locationName.toLowerCase().includes('sector 4')
+      isRecurrentHotspot: report.locationName.toLowerCase().includes('sector 4'),
+      declaredUrgency: report.urgency,
+      inferredUrgencyFromKeywords: determineSeverity(text, undefined)
     });
 
     const evidence = [
@@ -1007,7 +1551,7 @@ export class SCIPDatabase {
 
   // --- Incidents & Human Review ---
   public getIncidents(filter?: { status?: string; category?: string; priority?: string }): Incident[] {
-    let list = Array.from(this.incidents.values());
+    let list = Array.from(this.incidents.values()).filter(i => !(this.loadedFromPersistedState && isHiddenIncident(i)));
     if (filter?.status) list = list.filter(i => i.status === filter.status);
     if (filter?.category) list = list.filter(i => i.category === filter.category);
     if (filter?.priority) list = list.filter(i => i.priority === filter.priority);
@@ -1246,10 +1790,14 @@ export class SCIPDatabase {
         // Notify citizen
         this.createNotification({
           userId: r.citizenId,
+          eventType: 'report_resolved',
           title: 'Incident Resolved',
           message: `The incident affecting your report ${r.id} has been resolved by municipal authorities. Resolution: "${resolutionData.actionTaken}".`,
-          type: 'resolution',
-          link: r.id
+          channels: ['in_app', 'email', 'sms'],
+          priority: 'high',
+          data: { reportId: r.id, incidentId: incidentId, resolution: resolutionData.actionTaken },
+          relatedEntityId: r.id,
+          relatedEntityType: 'report'
         });
       }
     }
@@ -1269,9 +1817,176 @@ export class SCIPDatabase {
     return incident;
   }
 
+  public closeIncident(incidentId: string, closer: User, notes?: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved') {
+      throw new Error('Only resolved incidents can be closed. Current status: ' + incident.status);
+    }
+    if (closer.role === 'dept_officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (closer.role === 'officer' && closer.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== closer.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+
+    const now = new Date().toISOString();
+    incident.status = 'closed';
+    incident.updatedAt = now;
+    if (notes) {
+      incident.resolutionNotes = (incident.resolutionNotes || '') + `\n[CLOSED by ${closer.name}]: ${notes}`;
+    }
+
+    this.logAudit({
+      action: 'INCIDENT_RESOLVED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: closer.id,
+      userEmail: closer.email,
+      userRole: closer.role,
+      ipAddress: '127.0.0.1',
+      details: `Closed incident ${incidentId}${notes ? ': ' + notes : ''}`
+    });
+
+    // Notify assigned officer and department
+    if (incident.assignedOfficerId) {
+      this.createNotification({
+        userId: incident.assignedOfficerId,
+        eventType: 'incident_closed',
+        title: 'Incident Closed',
+        message: `Incident ${incidentId} has been officially closed.${notes ? ' Notes: ' + notes : ''}`,
+        channels: ['in_app', 'email'],
+        priority: 'medium',
+        data: { incidentId, notes },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
+      });
+    }
+
+    this.persist();
+    return incident;
+  }
+
+  public reopenIncident(incidentId: string, reopener: User, reason: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      throw new Error('Only resolved or closed incidents can be reopened. Current status: ' + incident.status);
+    }
+    if (reopener.role === 'dept_officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (reopener.role === 'officer' && reopener.departmentId && incident.assignedDepartmentId && incident.assignedDepartmentId !== reopener.departmentId) {
+      throw new Error('Department boundary violation.');
+    }
+    if (typeof reason !== 'string' || !reason.trim()) {
+      throw new Error('Reopening reason is required.');
+    }
+
+    const now = new Date().toISOString();
+    incident.status = 'in_progress';
+    incident.resolutionNotes = (incident.resolutionNotes || '') + `\n[REOPENED by ${reopener.name} on ${now}]: ${reason.trim()}`;
+    incident.resolvedAt = undefined;
+    incident.updatedAt = now;
+
+    this.logAudit({
+      action: 'INCIDENT_REVIEWED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: reopener.id,
+      userEmail: reopener.email,
+      userRole: reopener.role,
+      ipAddress: '127.0.0.1',
+      details: `Reopened incident ${incidentId}. Reason: ${reason.trim()}`
+    });
+
+    // Notify assigned officer
+    if (incident.assignedOfficerId) {
+      this.createNotification({
+        userId: incident.assignedOfficerId,
+        eventType: 'incident_reopened',
+        title: 'Incident Reopened',
+        message: `Incident ${incidentId} has been reopened: "${reason.trim()}"`,
+        channels: ['in_app', 'email', 'sms'],
+        priority: 'high',
+        data: { incidentId, reason: reason.trim() },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
+      });
+    }
+
+    // Notify citizens on linked reports
+    for (const rId of incident.reportIds) {
+      const r = this.reports.get(rId);
+      if (r) {
+        r.status = 'under_review';
+        this.reports.set(rId, r);
+        this.createNotification({
+          userId: r.citizenId,
+          eventType: 'incident_reopened',
+          title: 'Incident Reopened',
+          message: `The incident linked to your report ${rId} has been reopened for further investigation.`,
+          channels: ['in_app', 'email'],
+          priority: 'medium',
+          data: { incidentId, reportId: rId },
+          relatedEntityId: rId,
+          relatedEntityType: 'report'
+        });
+      }
+    }
+
+    this.persist();
+    return incident;
+  }
+
+  public verifyResolution(incidentId: string, citizenId: string, verified: boolean, comments?: string): Incident {
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident not found');
+    if (incident.status !== 'resolved' && incident.status !== 'closed') {
+      throw new Error('Resolution can only be verified for resolved or closed incidents.');
+    }
+
+    const report = incident.reportIds.map(rId => this.reports.get(rId)).find(r => r?.citizenId === citizenId);
+    if (!report) throw new Error('Citizen not associated with this incident.');
+
+    const resolution = Array.from(this.resolutions.values()).find(r => r.incidentId === incidentId);
+    if (!resolution) throw new Error('No resolution record found for this incident.');
+
+    resolution.citizenVerified = verified;
+    if (comments) {
+      resolution.actionTaken += `\n[Citizen Verification]: ${comments}`;
+    }
+
+    this.logAudit({
+      action: 'INCIDENT_RESOLVED',
+      module: 'incidents',
+      recordId: incidentId,
+      userId: citizenId,
+      userEmail: report.citizenEmail,
+      userRole: 'citizen',
+      ipAddress: '127.0.0.1',
+      details: `Citizen ${verified ? 'verified' : 'disputed'} resolution for incident ${incidentId}${comments ? ': ' + comments : ''}`
+    });
+
+    this.createNotification({
+      userId: incident.assignedOfficerId || '',
+      eventType: 'incident_verified',
+      title: 'Resolution ' + (verified ? 'Verified' : 'Disputed') + ' by Citizen',
+      message: `Citizen ${verified ? 'confirmed' : 'disputed'} the resolution for incident ${incidentId}.${comments ? ' Comments: ' + comments : ''}`,
+      channels: ['in_app', 'email'],
+      priority: 'medium',
+      data: { incidentId, verified, comments },
+      relatedEntityId: incidentId,
+      relatedEntityType: 'incident'
+    });
+
+    this.persist();
+    return incident;
+  }
+
   // --- Notifications ---
   public getNotificationsForUser(userId: string): Notification[] {
-    return this.notifications.filter(n => n.userId === userId);
+    return this.notifications.filter(n => n.userId === userId && !(this.loadedFromPersistedState && isHiddenNotification(n)));
   }
 
   public createNotification(data: Omit<Notification, 'id' | 'createdAt' | 'read'>): Notification {
@@ -1279,6 +1994,9 @@ export class SCIPDatabase {
       ...data,
       id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       read: false,
+      emailSent: false,
+      smsSent: false,
+      pushSent: false,
       createdAt: new Date().toISOString()
     };
     this.notifications.unshift(notif);
@@ -1299,6 +2017,128 @@ export class SCIPDatabase {
     this.persist();
   }
 
+  public findNotificationById(id: string): Notification | undefined {
+    return this.notifications.find(n => n.id === id);
+  }
+
+  public updateNotification(id: string, notification: Notification): Notification {
+    const index = this.notifications.findIndex(n => n.id === id);
+    if (index >= 0) {
+      this.notifications[index] = notification;
+      this.persist();
+      return notification;
+    }
+    throw new Error(`Notification ${id} not found`);
+  }
+
+  public deleteNotification(id: string): boolean {
+    const index = this.notifications.findIndex(n => n.id === id);
+    if (index >= 0) {
+      this.notifications.splice(index, 1);
+      this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  public findNotificationsByUser(userId: string, filters?: NotificationFilters): Notification[] {
+    let results = this.notifications.filter(n => n.userId === userId && !(this.loadedFromPersistedState && isHiddenNotification(n)));
+
+    if (filters) {
+      if (filters.eventType) {
+        results = results.filter(n => n.eventType === filters.eventType);
+      }
+      if (filters.channels?.length) {
+        results = results.filter(n => n.channels.some(c => filters.channels!.includes(c)));
+      }
+      if (filters.priority) {
+        results = results.filter(n => n.priority === filters.priority);
+      }
+      if (filters.read !== undefined) {
+        results = results.filter(n => n.read === filters.read);
+      }
+      if (filters.dateFrom) {
+        results = results.filter(n => n.createdAt >= filters.dateFrom!);
+      }
+      if (filters.dateTo) {
+        results = results.filter(n => n.createdAt <= filters.dateTo!);
+      }
+      if (filters.relatedEntityId) {
+        results = results.filter(n => n.relatedEntityId === filters.relatedEntityId);
+      }
+      if (filters.relatedEntityType) {
+        results = results.filter(n => n.relatedEntityType === filters.relatedEntityType);
+      }
+      if (filters.limit) {
+        results = results.slice(filters.offset || 0, (filters.offset || 0) + filters.limit);
+      }
+    }
+
+    return results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public getNotificationStats(userId: string): NotificationStats {
+    const notifications = this.notifications.filter(n => n.userId === userId);
+    const stats: NotificationStats = {
+      total: notifications.length,
+      unread: notifications.filter(n => !n.read).length,
+      byType: {} as Record<NotificationEventType, number>,
+      byChannel: {} as Record<NotificationChannel, number>,
+      byPriority: {} as Record<NotificationPriority, number>
+    };
+
+    for (const n of notifications) {
+      stats.byType[n.eventType] = (stats.byType[n.eventType] || 0) + 1;
+      for (const c of n.channels) {
+        stats.byChannel[c] = (stats.byChannel[c] || 0) + 1;
+      }
+      stats.byPriority[n.priority] = (stats.byPriority[n.priority] || 0) + 1;
+    }
+
+    return stats;
+  }
+
+  public findNotificationPreferencesByUserId(userId: string): NotificationPreference | undefined {
+    return this.notificationPreferences.get(userId);
+  }
+
+  public upsertNotificationPreferences(prefs: NotificationPreference): NotificationPreference {
+    this.notificationPreferences.set(prefs.userId, prefs);
+    this.persist();
+    return prefs;
+  }
+
+  public findAllNotificationTemplates(): NotificationTemplate[] {
+    return Array.from(this.notificationTemplates.values());
+  }
+
+  public findNotificationTemplateById(id: string): NotificationTemplate | undefined {
+    return this.notificationTemplates.get(id);
+  }
+
+  public findNotificationTemplateByEventType(eventType: NotificationEventType): NotificationTemplate | undefined {
+    return Array.from(this.notificationTemplates.values()).find(t => t.eventType === eventType);
+  }
+
+  public createNotificationTemplate(template: NotificationTemplate): NotificationTemplate {
+    this.notificationTemplates.set(template.id, template);
+    this.persist();
+    return template;
+  }
+
+  public updateNotificationTemplate(id: string, template: NotificationTemplate): NotificationTemplate {
+    if (!this.notificationTemplates.has(id)) {
+      throw new Error(`Template ${id} not found`);
+    }
+    this.notificationTemplates.set(id, template);
+    this.persist();
+    return template;
+  }
+
+  public deleteNotificationTemplate(id: string): boolean {
+    return this.notificationTemplates.delete(id);
+  }
+
   // --- Feedback ---
   public submitFeedback(data: Omit<Feedback, 'id' | 'createdAt'>): Feedback {
     const fb: Feedback = {
@@ -1312,12 +2152,12 @@ export class SCIPDatabase {
   }
 
   public getFeedbacks(): Feedback[] {
-    return this.feedbacks;
+    return this.loadedFromPersistedState ? this.feedbacks.filter(f => !isHiddenFeedback(f)) : this.feedbacks;
   }
 
   // --- Field Officer Inspections ---
   public getInspections(incidentId?: string): InspectionRecord[] {
-    const list = Array.from(this.inspections.values());
+    const list = Array.from(this.inspections.values()).filter(i => !(this.loadedFromPersistedState && isHiddenInspection(i)));
     if (incidentId) {
       return list.filter(i => i.incidentId === incidentId);
     }
@@ -1382,10 +2222,14 @@ export class SCIPDatabase {
     for (const doff of deptOfficers) {
       this.createNotification({
         userId: doff.id,
+        eventType: 'incident_updated',
         title: 'New Field Inspection Submitted',
         message: `Field officer ${officer.name} submitted inspection ${newRecord.id} for incident ${incident.id}. Requires verification.`,
-        type: 'incident_alert',
-        link: incident.id
+        channels: ['in_app', 'email'],
+        priority: 'medium',
+        data: { incidentId: incident.id, inspectionId: newRecord.id, officerId: officer.id, officerName: officer.name },
+        relatedEntityId: incident.id,
+        relatedEntityType: 'incident'
       });
     }
 
@@ -1498,10 +2342,14 @@ export class SCIPDatabase {
 
     this.createNotification({
       userId: officerId,
+      eventType: 'incident_assigned',
       title: 'New Incident Work Order Assigned',
       message: `You have been assigned as lead field investigator for incident ${incidentId} (${incident.title}).`,
-      type: 'assignment',
-      link: incidentId
+      channels: ['in_app', 'email', 'sms'],
+      priority: 'high',
+      data: { incidentId, incidentTitle: incident.title, departmentId, departmentName: dept?.name || departmentId },
+      relatedEntityId: incidentId,
+      relatedEntityType: 'incident'
     });
 
     this.logAudit({
@@ -1552,10 +2400,14 @@ export class SCIPDatabase {
     for (const auth of authorities) {
       this.createNotification({
         userId: auth.id,
+        eventType: 'incident_escalated',
         title: 'CRITICAL ESCALATION: Incident P1 Priority',
         message: `Incident ${incidentId} escalated by ${user.name}: "${reason}"`,
-        type: 'incident_alert',
-        link: incidentId
+        channels: ['in_app', 'email', 'sms'],
+        priority: 'critical',
+        data: { incidentId, reason, escalatedBy: user.name },
+        relatedEntityId: incidentId,
+        relatedEntityType: 'incident'
       });
     }
 
