@@ -21,7 +21,7 @@ const router = Router();
 
 // In-memory image store (dev/local). Buffers are also written to uploads/ directory.
 // Note: uploaded images are not persisted across server restarts unless written to disk.
-const imageStore = new Map<string, { buffer: Buffer; metadata: ImageMetadata; analysis?: any }>();
+const imageStore = new Map<string, { buffer: Buffer; metadata: ImageMetadata; analysis?: any; uploadedBy?: string }>();
 
 const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads');
 function ensureUploadDir(): void {
@@ -34,14 +34,14 @@ function ensureUploadDir(): void {
   }
 }
 
-function storeImage(imageId: string, buffer: Buffer, metadata: ImageMetadata): void {
-  imageStore.set(imageId, { buffer, metadata });
+function storeImage(imageId: string, buffer: Buffer, metadata: ImageMetadata, uploadedBy?: string): void {
+  imageStore.set(imageId, { buffer, metadata, uploadedBy });
   try {
     ensureUploadDir();
     fs.writeFileSync(path.join(UPLOAD_DIR, `${imageId}.bin`), buffer);
     fs.writeFileSync(
       path.join(UPLOAD_DIR, `${imageId}.meta.json`),
-      JSON.stringify(metadata, null, 2)
+      JSON.stringify({ ...metadata, uploadedBy }, null, 2)
     );
   } catch {
     // Disk write failure is non-fatal; in-memory store is authoritative for this session.
@@ -63,7 +63,7 @@ router.post('/upload', authenticate, requirePermission('image.upload'), async (r
     // Persist buffer + metadata for later retrieval/serve
     const parsed = parseDataUrl(dataUrl);
     if (parsed) {
-      storeImage(result.imageId, parsed.buffer, result.metadata);
+      storeImage(result.imageId, parsed.buffer, result.metadata, uploadedBy);
     }
 
     await db.logAudit({
@@ -127,7 +127,7 @@ router.post('/analyze', authenticate, requirePermission('image.read'), async (re
       if (parsed.mimeType && parsed.mimeType !== 'application/octet-stream') {
         metadata.mimeType = parsed.mimeType;
       }
-      storeImage(metadata.imageId, parsed.buffer, metadata);
+      storeImage(metadata.imageId, parsed.buffer, metadata, req.user?.id);
     } else {
       res.status(400).json({ success: false, message: 'imageId or dataUrl is required.', errors: ['Missing image reference.'] });
       return;
@@ -145,12 +145,19 @@ router.post('/analyze', authenticate, requirePermission('image.read'), async (re
   }
 });
 
-// GET /api/image/:id — serve stored image buffer
+// GET /api/image/:id — serve stored image buffer (owner or privileged role only)
 router.get('/:id', authenticate, requirePermission('image.read'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const stored = imageStore.get(req.params.id);
     if (!stored) {
       res.status(404).json({ success: false, message: 'Image not found.', errors: ['Image not found.'] });
+      return;
+    }
+    const user = req.user!;
+    const isOwner = stored.uploadedBy === user.id;
+    const isPrivileged = ['analyst', 'authority', 'admin'].includes(user.role);
+    if (!isOwner && !isPrivileged) {
+      res.status(403).json({ success: false, message: 'Access denied.', errors: ['Not authorized to access this image.'] });
       return;
     }
     res.setHeader('Content-Type', stored.metadata.mimeType);

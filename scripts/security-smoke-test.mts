@@ -33,12 +33,12 @@ function expectThrow(name: string, fn: () => any, msgIncludes?: string) {
 
 const db = new SCIPDatabase(tmpDb);
 ok('isolated db uses temp path', !tmpDb.includes('.scip_database.json'));
+const allUsers: any[] = Array.from((db as any).users.values());
 const users = db.getUsers();
-const reports = db.getReports();
-const incidents = db.getIncidents();
-ok('seeded users exist', users.length > 0);
-ok('seeded reports exist', reports.length > 0);
-ok('seeded incidents exist', incidents.length > 0);
+const seededReports = Array.from((db as any).reports.values());
+const seededIncidents = Array.from((db as any).incidents.values());
+ok('seeded reports exist', seededReports.length > 0);
+ok('seeded incidents exist', seededIncidents.length > 0);
 
 // RBAC matrix samples
 const matrix: Array<[string, string, boolean]> = [
@@ -55,33 +55,33 @@ for (const [role, perm, expected] of matrix) {
 
 // Sanitization
 ok('getUsers strips passwordHash', users.every(u => !(u as any).passwordHash));
-const admin = users.find(u => u.role === 'admin')!;
-const authority = users.find(u => u.role === 'authority') || admin;
-const citizen = users.find(u => u.role === 'citizen')!;
-const dept = users.find(u => u.role === 'dept_officer') || authority;
-const officer = users.find(u => u.role === 'officer') || authority;
-const otherCitizen = users.find(u => u.role === 'citizen' && u.id !== citizen.id) || citizen;
+const admin = allUsers.find((u: any) => u.role === 'admin')!;
+const authority = allUsers.find((u: any) => u.role === 'authority') || admin;
+const citizen = allUsers.find((u: any) => u.role === 'citizen')!;
+const dept = allUsers.find((u: any) => u.role === 'dept_officer') || authority;
+const officer = allUsers.find((u: any) => u.role === 'officer') || authority;
+const otherCitizen = allUsers.find((u: any) => u.role === 'citizen' && u.id !== citizen.id) || citizen;
 
 // Assignment DB guards
-const openIncident = incidents.find(i => i.status !== 'resolved' && i.status !== 'dismissed' && i.status !== 'closed') || incidents[0];
+const openIncident = seededIncidents.find((i: any) => i.status !== 'resolved' && i.status !== 'dismissed' && i.status !== 'closed') || seededIncidents[0];
 if (openIncident) {
   expectThrow('assign rejects non-existent officer', () => db.assignIncidentOfficer(openIncident.id, 'DEP-WTR', 'NOPE', 'Nope', admin, ''));
   expectThrow('assign rejects closed incident guard path (non-target)', () => db.assignIncidentOfficer('NOPE-ID', 'DEP-WTR', 'NOPE', 'Nope', admin, ''), 'not found');
 }
 
 // Withdraw guards
-const citizenReport = reports.find(r => r.citizenId === citizen.id) || reports.find(r => r.status === 'submitted');
+const citizenReport = seededReports.find((r: any) => r.citizenId === citizen.id) || seededReports.find((r: any) => r.status === 'submitted');
 if (citizenReport) {
   expectThrow('withdraw rejects other citizen', () => db.withdrawReport(citizenReport.id, otherCitizen.id === citizen.id ? admin : otherCitizen), 'Unauthorized');
 }
 // withdraw closed
-const closedReport = reports.find(r => r.status === 'closed' || r.status === 'resolved');
+const closedReport = seededReports.find((r: any) => r.status === 'closed' || r.status === 'resolved');
 if (closedReport) {
   expectThrow('withdraw rejects closed report', () => db.withdrawReport(closedReport.id, admin), 'closed');
 }
 
 // Review/resolve/escalate closed guards
-const closedIncident = incidents.find(i => i.status === 'resolved' || i.status === 'dismissed' || i.status === 'closed');
+const closedIncident = seededIncidents.find((i: any) => i.status === 'resolved' || i.status === 'dismissed' || i.status === 'closed');
 if (closedIncident) {
   expectThrow('review rejects closed incident', () => db.reviewIncident(closedIncident.id, 'confirm', admin, 'note'), 'closed');
   expectThrow('resolve rejects closed incident', () => db.resolveIncident(closedIncident.id, admin, { actionTaken: 'done' }), 'closed');

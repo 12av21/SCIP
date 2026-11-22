@@ -7,6 +7,7 @@
  * - No silent split-brain/cutover: if any gate fails, file-backed JSON remains active.
  * - Exports `db` as a delegating repository (active backend selected safely at startup).
  */
+import path from 'node:path';
 import { SCIPDatabase } from './scipDatabase.js';
 import { JsonScipRepository } from './jsonRepository.js';
 import { MongoScipRepository } from './mongoRepository.js';
@@ -26,7 +27,23 @@ function selectDriver(): DatabaseDriverSelection {
 }
 
 const requestedDriver = selectDriver();
-const jsonRepository = new JsonScipRepository();
+const testDbPath = process.env.SCIP_TEST_DB_PATH || process.env.SCIP_DB_PATH;
+// Allow forcing test database isolation via SCIP_FORCE_TEST_DB=1 regardless of NODE_ENV.
+// This enables E2E tests to run with NODE_ENV=test while serving the production-built frontend.
+const forceTestDb = process.env.SCIP_FORCE_TEST_DB === '1';
+let jsonRepository: JsonScipRepository;
+if (testDbPath && (process.env.NODE_ENV === 'test' || forceTestDb)) {
+  const resolved = path.resolve(process.cwd(), testDbPath);
+  if (path.basename(resolved) === '.scip_database.json') {
+    throw new Error('Refusing to use production database file in test mode.');
+  }
+  jsonRepository = new JsonScipRepository(resolved);
+} else if (process.env.NODE_ENV === 'test' || forceTestDb) {
+  // Test mode without explicit test DB path - fail closed to prevent accidental primary DB access
+  throw new Error('Test mode requires SCIP_TEST_DB_PATH or SCIP_DB_PATH to be set for database isolation.');
+} else {
+  jsonRepository = new JsonScipRepository();
+}
 let mongoRepository: MongoScipRepository | null = null;
 let activeRepository: IScipRepository = jsonRepository;
 let activeDriver: 'json' | 'mongo' | 'mongo-fallback-json' = requestedDriver === 'mongo' ? 'mongo-fallback-json' : 'json';
@@ -44,13 +61,14 @@ function getIsolatedMongoDbNameFromUri(uri: string): string | null {
 
 function isIsolatedLocalMongoUri(uri: string): boolean {
   const lower = uri.toLowerCase();
-  if (lower.includes('mongodb.net') || lower.includes('mongodb+srv://')) return false;
-  if (!/^mongodb:\/\//.test(lower)) return false;
-  if (!(lower.includes('127.0.0.1') || lower.includes('localhost') || lower.includes('[::1]'))) return false;
+  const isAtlas = lower.includes('mongodb.net') || lower.includes('mongodb+srv://');
+  if (isAtlas && process.env.NODE_ENV !== 'development') return false;
+  if (!/^mongodb(\+srv)?:\/\//.test(lower)) return false;
+  if (!isAtlas && !(lower.includes('127.0.0.1') || lower.includes('localhost') || lower.includes('[::1]'))) return false;
   const dbName = getIsolatedMongoDbNameFromUri(uri);
   if (!dbName) return false;
-  // Explicit isolated targets only: approved dev DB or ephemeral local parity-test DBs.
-  return dbName === 'scip_dev' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
+  // Explicit isolated targets only: approved dev DB, production DB, or ephemeral local parity-test DBs.
+  return dbName === 'scip' || dbName === 'scip_dev' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
 }
 
 export function tryEnableMongoRuntime(mongoStatus?: { driverState?: string; dbName?: string | null }): { enabled: boolean; reason?: string } {
@@ -112,6 +130,19 @@ export const db: IScipRepository = {
   getUsers: delegate('getUsers'),
   getUserById: delegate('getUserById'),
   getUserByEmailWithPassword: delegate('getUserByEmailWithPassword'),
+  getUserByClerkId: delegate('getUserByClerkId'),
+  // --- Clerk Identity Linking (Phase 3.1.3) ---
+  linkClerkIdentity: delegate('linkClerkIdentity'),
+  createClerkLinkRequest: delegate('createClerkLinkRequest'),
+  getClerkLinkById: delegate('getClerkLinkById'),
+  getClerkLinkBySubject: delegate('getClerkLinkBySubject'),
+  getClerkLinksByScipUser: delegate('getClerkLinksByScipUser'),
+  listPendingClerkLinks: delegate('listPendingClerkLinks'),
+  setClerkLinkChallenge: delegate('setClerkLinkChallenge'),
+  submitClerkLinkChallenge: delegate('submitClerkLinkChallenge'),
+  decideClerkLink: delegate('decideClerkLink'),
+  cancelClerkLink: delegate('cancelClerkLink'),
+  expireStaleClerkLinks: delegate('expireStaleClerkLinks'),
   createUser: delegate('createUser'),
   updateUserRole: delegate('updateUserRole'),
   updateUserStatus: delegate('updateUserStatus'),
@@ -134,6 +165,9 @@ export const db: IScipRepository = {
   createIncidentFromCluster: delegate('createIncidentFromCluster'),
   reviewIncident: delegate('reviewIncident'),
   resolveIncident: delegate('resolveIncident'),
+  closeIncident: delegate('closeIncident'),
+  reopenIncident: delegate('reopenIncident'),
+  verifyResolution: delegate('verifyResolution'),
   getNotificationsForUser: delegate('getNotificationsForUser'),
   createNotification: delegate('createNotification'),
   markNotificationAsRead: delegate('markNotificationAsRead'),
@@ -199,6 +233,16 @@ export const db: IScipRepository = {
   listBackups: delegate('listBackups'),
   pruneBackups: delegate('pruneBackups'),
   restoreFromBackup: delegate('restoreFromBackup'),
+
+  // --- Email & SMS Verification ---
+  setUserEmailVerificationToken: delegate('setUserEmailVerificationToken'),
+  setUserPhoneVerificationOtp: delegate('setUserPhoneVerificationOtp'),
+  verifyUserEmail: delegate('verifyUserEmail'),
+  verifyUserPhone: delegate('verifyUserPhone'),
+  getUserVerificationStatus: delegate('getUserVerificationStatus'),
+  incrementVerificationAttempts: delegate('incrementVerificationAttempts'),
+  resetVerificationAttempts: delegate('resetVerificationAttempts'),
+  updateUserVerificationStatus: delegate('updateUserVerificationStatus'),
 } as IScipRepository;
 
 export const REQUESTED_DATABASE_DRIVER: DatabaseDriverSelection = requestedDriver;

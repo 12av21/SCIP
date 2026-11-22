@@ -10,11 +10,11 @@ import {
   ImageUploadResult,
   ImageSource
 } from '../types/scip.js';
+import { aiAdapter } from './aiServiceAdapter.js';
 
 const nowIso = (): string => new Date().toISOString();
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB (matches express json limit)
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL;
 
 /** Detect image format from magic bytes. */
 export function detectFormat(buffer: Buffer | Uint8Array): 'jpeg' | 'png' | 'webp' | 'gif' | 'unknown' {
@@ -359,6 +359,18 @@ export function parseDataUrl(dataUrl: string): { buffer: Buffer; mimeType: strin
   const base64 = match[2];
   try {
     const buffer = Buffer.from(base64, 'base64');
+    // Validate that the claimed MIME matches the actual buffer magic bytes
+    const detected = detectFormat(buffer);
+    const allowedMimes: Record<string, string[]> = {
+      jpeg: ['image/jpeg', 'image/jpg'],
+      png: ['image/png'],
+      webp: ['image/webp'],
+      gif: ['image/gif']
+    };
+    const allowed = allowedMimes[detected];
+    if (!allowed || !allowed.includes(mimeType.toLowerCase())) {
+      return null;
+    }
     return { buffer, mimeType };
   } catch {
     return null;
@@ -417,32 +429,25 @@ export async function analyzeImage(
 ): Promise<ImageAnalysis> {
   const imageId = metadata.imageId;
 
-  // Try Python service for OCR if configured
-  if (AI_SERVICE_URL) {
-    try {
-      const base64 = buffer.toString('base64');
-      const res = await fetch(`${AI_SERVICE_URL}/analyze-image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_id: imageId, image_base64: base64, mime_type: metadata.mimeType })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          imageId,
-          ocrText: data.ocr_text,
-          detectedObjects: Array.isArray(data.detected_objects) ? data.detected_objects : [],
-          sceneLabels: Array.isArray(data.scene_labels) ? data.scene_labels : [],
-          hasText: Boolean(data.has_text),
-          hasDamage: Boolean(data.has_damage),
-          confidence: Number(data.confidence) || 0.7,
-          modelVersion: data.model_version || 'scip-python-vision-v1.0',
-          analyzedAt: nowIso()
-        };
-      }
-    } catch {
-      // Fall through to local heuristic
-    }
+  // Try the Python vision service through the adapter (gated by AI_SERVICE_ENABLED,
+  // with the standard timeout). Returns null when disabled, unreachable, or unsupported.
+  const data = await aiAdapter.analyzeImage({
+    imageId,
+    imageBase64: buffer.toString('base64'),
+    mimeType: metadata.mimeType
+  });
+  if (data) {
+    return {
+      imageId,
+      ocrText: data.ocr_text,
+      detectedObjects: Array.isArray(data.detected_objects) ? data.detected_objects : [],
+      sceneLabels: Array.isArray(data.scene_labels) ? data.scene_labels : [],
+      hasText: Boolean(data.has_text),
+      hasDamage: Boolean(data.has_damage),
+      confidence: Number(data.confidence) || 0.7,
+      modelVersion: data.model_version || 'scip-python-vision-v1.0',
+      analyzedAt: nowIso()
+    };
   }
 
   const heuristic = heuristicAnalysis(buffer, metadata.format, description);

@@ -36,9 +36,12 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
 }) => {
   const { user } = useAuth();
   const [reports, setReports] = useState<Report[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   // Profile residence location edit state
   const [profileEditMode, setProfileEditMode] = useState(false);
   const [profileUpdating, setProfileUpdating] = useState(false);
@@ -64,13 +67,18 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const rep = await api.getReports({ myOnly: true });
       const inc = await api.getIncidents();
+      const notifRes = await api.getNotifications({ limit: 10 }).catch(() => null);
+      const unreadRes = await api.getUnreadCount().catch(() => null);
       setReports(rep || []);
       setIncidents(inc || []);
-    } catch {
-      // Ignore
+      if (notifRes && notifRes.success) { setNotifications(notifRes.data || []); }
+      if (unreadRes && unreadRes.success) { setUnreadCount(unreadRes.data?.unread || 0); }
+    } catch (err: any) {
+      setLoadError(err?.message || 'Failed to load dashboard data. Please retry.');
     } finally {
       setIsLoading(false);
     }
@@ -162,6 +170,20 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto py-2 text-[#253443]">
+      {loadError && (
+        <div className="bg-[#FEF2F2] border border-[#FCA5A5] text-[#991B1B] p-4 rounded-xl text-xs flex items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-[#B42318]" />
+            <span>{loadError}</span>
+          </div>
+          <button
+            onClick={loadData}
+            className="px-3 py-1 bg-white border border-[#FCA5A5] rounded text-[11px] font-semibold hover:bg-slate-50 shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* Welcome Banner */}
       <div className="bg-white rounded-xl border border-[#DCE3EA] p-6 flex flex-wrap items-center justify-between gap-4 shadow-xs">
         <div>

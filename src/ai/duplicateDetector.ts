@@ -38,6 +38,20 @@ export function calculateTimeDeltaHours(timeA: string, timeB: string): number {
 
 /**
  * Find similar reports and calculate duplicate probabilities for a given target report.
+ *
+ * Single unified scoring formula (documented):
+ *
+ *   dupScore = (textSim * 0.50) + (spatialFactor * 0.35) + (temporalFactor * 0.15)
+ *   dupScore = dupScore * categoryFactor
+ *
+ *   spatialFactor   = max(0, 1 - distanceMeters / 300)   // 1.0 at 0m, 0 at 300m
+ *   temporalFactor  = max(0, 1 - timeDeltaHours / 48)    // 1.0 at 0h, 0 at 48h
+ *   categoryFactor  = 1.0 if same category, 0.4 if different
+ *
+ * Duplicate threshold: dupScore >= 0.70 OR (distance <= 50m AND time <= 12h AND textSim >= 0.55)
+ *
+ * The same dupScore is used for both isPotentialDuplicate and duplicateProbability,
+ * so they always agree. duplicateProbability is a clamped rescaling of dupScore into [0, 0.95].
  */
 export function findSimilarAndDuplicateReports(
   targetReport: Report,
@@ -70,17 +84,16 @@ export function findSimilarAndDuplicateReports(
     const timeDeltaHours = calculateTimeDeltaHours(targetReport.createdAt, report.createdAt);
     const matchingTerms = globalVectorizer.getMatchingTerms(targetVec, reportVec, 4);
 
-    // Compute composite duplicate score:
-    // Spatial factor: 1.0 at 0m, drops to 0 at 300m
+    // Spatial factor: 1.0 at 0m, drops linearly to 0 at 300m
     const spatialFactor = Math.max(0, 1 - distanceMeters / 300);
-    // Temporal factor: 1.0 at 0h, drops to 0 at 48h
+    // Temporal factor: 1.0 at 0h, drops linearly to 0 at 48h
     const temporalFactor = Math.max(0, 1 - timeDeltaHours / 48);
 
     // Category match bonus
     const categoryFactor = targetReport.category === report.category ? 1.0 : 0.4;
 
-    // Combined duplicate probability
-    let dupScore = (textSim * 0.5) + (spatialFactor * 0.35) + (temporalFactor * 0.15);
+    // Combined duplicate score (unified formula)
+    let dupScore = (textSim * 0.50) + (spatialFactor * 0.35) + (temporalFactor * 0.15);
     dupScore = dupScore * categoryFactor;
 
     const isDuplicate = dupScore >= 0.70 || (distanceMeters <= 50 && timeDeltaHours <= 12 && textSim >= 0.55);
@@ -94,7 +107,8 @@ export function findSimilarAndDuplicateReports(
         distanceMeters,
         timeDeltaHours,
         matchingTerms,
-        isPotentialDuplicate: isDuplicate
+        isPotentialDuplicate: isDuplicate,
+        duplicateScore: Number(dupScore.toFixed(4))
       });
     }
   }
@@ -110,8 +124,13 @@ export function findSimilarAndDuplicateReports(
 
   if (highestMatch) {
     if (highestMatch.isPotentialDuplicate) {
+      // Probability is derived from the same duplicateScore that drove isPotentialDuplicate,
+      // so isPotentialDuplicate=true ⟺ duplicateProbability >= 0.70 (never contradictory).
+      // Duplicate scores in [0.70, 1.00] map to [0.70, 0.95]; override-path duplicates
+      // (dupScore < 0.70 but still duplicate) are floored at 0.70.
+      const dupScore = highestMatch.duplicateScore ?? 0;
       duplicateProbability = Number(
-        Math.min(0.95, (highestMatch.similarityScore * 0.6) + (Math.max(0, 1 - highestMatch.distanceMeters / 200) * 0.4)).toFixed(2)
+        Math.min(0.95, Math.max(0.70, dupScore)).toFixed(2)
       );
       evidence.push(`High spatial proximity: ${highestMatch.distanceMeters}m from Report ${highestMatch.reportId}`);
       evidence.push(`Temporal window: within ${highestMatch.timeDeltaHours} hours of prior submission`);
@@ -120,7 +139,9 @@ export function findSimilarAndDuplicateReports(
       }
       evidence.push('AI Interpretation: Potential duplicate citizen report regarding the same underlying ground event');
     } else {
-      duplicateProbability = Number(Math.max(0.05, highestMatch.similarityScore * 0.4).toFixed(2));
+      // Non-duplicate: probability stays strictly below 0.70 to avoid contradicting the decision.
+      const dupScore = highestMatch.duplicateScore ?? 0;
+      duplicateProbability = Number(Math.min(0.69, Math.max(0.00, dupScore)).toFixed(2));
       evidence.push(`Related reports identified in vicinity (${highestMatch.distanceMeters}m), but distinct observations`);
     }
   } else {
