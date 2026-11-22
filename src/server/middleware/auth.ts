@@ -163,6 +163,26 @@ const ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     'geoanalytics.read',
     'image.read',
     'image.upload'
+  ],
+  system: [
+    'user.read',
+    'report.read',
+    'report.update',
+    'report.assign',
+    'incident.read',
+    'incident.create',
+    'incident.update',
+    'incident.assign',
+    'incident.resolve',
+    'incident.escalate',
+    'inspection.read',
+    'analytics.read',
+    'intelligence.read',
+    'audit.read',
+    'model.evaluate',
+    'data.export',
+    'notification.send',
+    'notification.manage'
   ]
 };
 

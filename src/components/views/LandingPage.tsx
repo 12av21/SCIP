@@ -2,8 +2,8 @@
 // Inspired by the information architecture, visual hierarchy and usability of MyGov.in
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { api } from '../../services/apiClient';
-import { Report, Incident, Department, User } from '../../types/scip';
 import {
   FileText,
   Search,
@@ -42,48 +42,55 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSelectReportId
 }) => {
   const { isAuthenticated, role } = useAuth();
+  const { language } = useLanguage();
 
-  // Real Database Data State
-  const [reports, setReports] = useState<Report[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [trends, setTrends] = useState<any>(null);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isError, setIsError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  // Public stats state
+  const [publicStats, setPublicStats] = useState<{
+    registeredCitizens: number;
+    totalReports: number;
+    pendingReports: number;
+    underReviewReports: number;
+    resolvedReports: number;
+    activeIncidents: number;
+    resolutionRate: number;
+    categoryCounts: Record<string, number>;
+    dailyVolume: Record<string, number>;
+    incidentStatusCounts: Record<string, number>;
+  } | null>(null);
+  const [latestActivities, setLatestActivities] = useState<Array<{
+    id: string;
+    title: string;
+    category: string;
+    date: string;
+    type: 'incident' | 'report';
+    status: string;
+    location: string;
+    summary: string;
+  }>>([]);
 
   // Quick Tracker input state
   const [trackingInput, setTrackingInput] = useState('');
 
   useEffect(() => {
-    loadPortalData();
+    loadPublicStats();
+    loadLatestActivities();
   }, []);
 
-  const loadPortalData = async () => {
-    setIsLoading(true);
-    setIsError(false);
-    setErrorMessage('');
+  const loadPublicStats = async () => {
     try {
-      const [repData, incData, deptData, userData, trendData] = await Promise.all([
-        api.getReports().catch(() => []),
-        api.getIncidents().catch(() => []),
-        api.getDepartments().catch(() => []),
-        api.getUsers().catch(() => []),
-        api.getTrends().catch(() => null)
-      ]);
+      const stats = await api.getPublicStats();
+      if (stats) setPublicStats(stats);
+    } catch (err) {
+      console.error('Failed to load public stats:', err);
+    }
+  };
 
-      setReports(repData || []);
-      setIncidents(incData || []);
-      setDepartments(deptData || []);
-      setUsers(userData || []);
-      setTrends(trendData);
-    } catch (err: any) {
-      setIsError(true);
-      setErrorMessage(err.message || 'Failed to connect to municipal database.');
-    } finally {
-      setIsLoading(false);
+  const loadLatestActivities = async () => {
+    try {
+      const activities = await api.getPublicLatest();
+      if (activities) setLatestActivities(activities);
+    } catch (err) {
+      console.error('Failed to load latest activities:', err);
     }
   };
 
@@ -92,41 +99,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     if (!trackingInput.trim()) return;
     onNavigate('track-report');
   };
-
-  // Metrics derived strictly from real database records
-  const totalReports = reports.length;
-  const pendingReports = reports.filter(r => r.status === 'submitted' || r.status === 'analyzed').length;
-  const underReviewReports = reports.filter(r => r.status === 'under_review' || r.status === 'linked' || r.status === 'assigned').length;
-  const resolvedReports = reports.filter(r => r.status === 'resolved').length;
-  const activeIncidents = incidents.filter(i => i.status === 'confirmed' || i.status === 'in_progress').length;
-  const registeredCitizens = users.filter(u => u.role === 'citizen').length || users.length;
-  const resolutionRate = totalReports > 0 ? Math.round((resolvedReports / totalReports) * 100) : 0;
-
-  // Real latest community activities from database
-  const latestActivities = [
-    ...incidents.map(inc => ({
-      id: inc.id,
-      title: inc.title,
-      category: inc.category,
-      date: inc.createdAt,
-      type: 'incident' as const,
-      status: inc.status,
-      location: inc.locationName,
-      summary: inc.description
-    })),
-    ...reports.map(rep => ({
-      id: rep.id,
-      title: rep.title,
-      category: rep.category,
-      date: rep.createdAt,
-      type: 'report' as const,
-      status: rep.status,
-      location: rep.locationName,
-      summary: rep.description
-    }))
-  ]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 4);
 
   return (
     <div className="space-y-12 py-2 text-[#253443]">
@@ -474,17 +446,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
 
         {/* Error State if database fails */}
-        {isError && (
+        {publicStats === null && latestActivities.length === 0 && (
           <div className="bg-[#FEF2F2] border border-[#FCA5A5] text-[#991B1B] p-4 rounded-lg text-xs flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-[#B42318]" />
-              <span>{errorMessage}</span>
+              <span>{language === 'HI' ? 'डेटा लोड करने में विफल' : 'Failed to load data from municipal database'}</span>
             </div>
             <button
-              onClick={loadPortalData}
+              onClick={() => { loadPublicStats(); loadLatestActivities(); }}
               className="px-3 py-1 bg-white border border-[#FCA5A5] rounded text-[11px] font-semibold"
             >
-              Retry Database Sync
+              {language === 'HI' ? 'पुनः प्रयास करें' : 'Retry Database Sync'}
             </button>
           </div>
         )}
@@ -496,7 +468,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Registered Citizens
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : registeredCitizens}
+              {publicStats ? publicStats.registeredCitizens : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Active user accounts</div>
           </div>
@@ -507,7 +479,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Total Reports
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : totalReports}
+              {publicStats ? publicStats.totalReports : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Logged ground observations</div>
           </div>
@@ -518,7 +490,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Under Review
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#E89B36] font-mono tabular-nums">
-              {isLoading ? '...' : underReviewReports + pendingReports}
+              {publicStats ? publicStats.underReviewReports + publicStats.pendingReports : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Under active investigation</div>
           </div>
@@ -529,7 +501,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Resolved Reports
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#28834A] font-mono tabular-nums">
-              {isLoading ? '...' : resolvedReports}
+              {publicStats ? publicStats.resolvedReports : '...'}
             </div>
             <div className="text-[10px] text-[#28834A] font-semibold">Remediated & verified</div>
           </div>
@@ -540,7 +512,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Active Incidents
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#1F5F91] font-mono tabular-nums">
-              {isLoading ? '...' : activeIncidents}
+              {publicStats ? publicStats.activeIncidents : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Confirmed work orders</div>
           </div>
@@ -551,7 +523,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Resolution Rate
             </div>
             <div className="text-2xl sm:text-3xl font-black text-[#153E63] font-mono tabular-nums">
-              {isLoading ? '...' : `${resolutionRate}%`}
+              {publicStats ? `${publicStats.resolutionRate}%` : '...'}
             </div>
             <div className="text-[10px] text-[#657586]">Cumulative closure ratio</div>
           </div>

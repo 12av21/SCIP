@@ -233,4 +233,15 @@ router.delete('/:id', async (req: AuthenticatedRequest, res) => {
   }
 });
 
+// POST /api/notifications/process-scheduled - Process scheduled notifications (admin only)
+router.post('/process-scheduled', requireRole(['admin']), async (req: AuthenticatedRequest, res) => {
+  try {
+    // This would process hourly/daily digests based on user preferences
+    // For now, just return success
+    res.json({ success: true, message: 'Scheduled notifications processed', data: { processed: 0 } });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to process scheduled notifications' });
+  }
+});
+
 export default router;

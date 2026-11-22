@@ -38,6 +38,7 @@ import { DeptOfficerDashboard } from './components/views/DeptOfficerDashboard';
 import { DataAnalystDashboard } from './components/views/DataAnalystDashboard';
 import { AuthorityDashboard } from './components/views/AuthorityDashboard';
 import { ReportingCenter } from './components/views/ReportingCenter';
+import { NotificationsView } from './components/views/NotificationsView';
 import { ReportDetailModal } from './components/views/ReportDetailModal';
 import { AuthModal } from './components/views/AuthModal';
 import { AccountLinkingModal } from './components/views/AccountLinkingModal';
@@ -326,6 +327,10 @@ function SCIPMainLayout() {
 
         {currentTab === 'reporting' && (
           <ReportingCenter />
+        )}
+
+        {currentTab === 'notifications' && (
+          <NotificationsView />
         )}
 
         {currentTab === 'admin-panel' && (

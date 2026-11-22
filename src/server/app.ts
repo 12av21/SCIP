@@ -21,6 +21,7 @@ import linkingRoutes from './routes/linkingRoutes';
 import datasetRoutes from './routes/datasetRoutes';
 import reportingRoutes from './routes/reportingRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import publicStatsRoutes from './routes/publicStatsRoutes';
 import { initMongoConnection, getMongoRuntimeStatus } from '../database/mongoConnection.js';
 import { tryEnableMongoRuntime } from '../database/index.js';
 import { validateClerkConfigOnStartup } from './middleware/auth.js';
@@ -145,6 +146,7 @@ app.use('/api/india', indiaCivicRoutes);
 app.use('/api/dataset', datasetRoutes);
 app.use('/api/reporting', reportingRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/public', publicStatsRoutes);
 app.use('/api', miscRoutes);
 
   // API 404 and safe error handling (before SPA fallback)

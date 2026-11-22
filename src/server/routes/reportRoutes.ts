@@ -5,6 +5,8 @@ import { db } from '../../database/index.js';
 import { authenticate, AuthenticatedRequest, requirePermission } from '../middleware/auth.js';
 import { Report, ReportCategory, ReportStatus, UrgencyLevel, LocationSource, ImageAnalysis } from '../../types/scip.js';
 import { processImageUpload, parseDataUrl, analyzeImage, extractImageMetadata } from '../../ai/imageIntelligence.js';
+import { notificationService } from '../../services/notificationService.js';
+import { NotificationEventType } from '../../types/scip.js';
 
 const router = Router();
 
@@ -317,6 +319,17 @@ router.post(
         message: 'Report submitted and processed by SCIP intelligence pipeline.',
         data: { report, analysis, imageAnalyses }
       });
+      
+      // Trigger notification for report submission
+      await notificationService.processEvent('report_submitted', {
+        reportId: report.id,
+        category: report.category,
+        location: report.locationName,
+        description: report.description,
+        departmentId: report.incidentId ? undefined : (report.category === 'Water & Drainage' || report.category === 'Public Sanitation' ? 'water' : 
+          report.category === 'Roads & Traffic' ? 'roads' : 
+          report.category === 'Power & Lighting' ? 'power' : 'general')
+      });
     } catch (err: any) {
       res.status(500).json({
         success: false,
@@ -382,6 +395,17 @@ router.put('/:id', authenticate, requirePermission('report.update'), async (req:
     }
 
     const updated = await db.updateReport(req.params.id, updates, user);
+    
+    // Trigger notification for report status change
+    if (updates.status && updates.status !== existing.status) {
+      await notificationService.processEvent('report_status_changed', {
+        reportId: req.params.id,
+        newStatus: updates.status,
+        updatedBy: user.name,
+        citizenId: existing.citizenId
+      });
+    }
+    
     res.json({ success: true, message: 'Report updated successfully.', data: sanitizeReportForRole(user.role, updated) });
   } catch (err: any) {
     const msg = process.env.NODE_ENV === 'production' ? 'Request failed.' : err.message;

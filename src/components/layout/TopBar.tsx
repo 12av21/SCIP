@@ -45,8 +45,8 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const loadNotifications = async () => {
     try {
-      const res = await api.getNotifications();
-      if (res && res.data) {
+      const res = await api.getNotifications({ limit: 50 });
+      if (res && res.success && res.data) {
         setNotifications(res.data);
       }
     } catch {
@@ -57,7 +57,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleMarkAllRead = async () => {
-    await api.markAllNotificationsRead();
+    await api.markAllNotificationsAsRead();
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
@@ -164,7 +164,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                         <div
                           key={notif.id}
                           onClick={() => {
-                            api.markNotificationRead(notif.id);
+                            api.markNotificationAsRead(notif.id);
                             if (notif.relatedEntityType === 'incident' && notif.relatedEntityId?.startsWith('INC')) {
                               onNavigate('incidents');
                             } else if (notif.relatedEntityType === 'report' && notif.relatedEntityId?.startsWith('REP')) {

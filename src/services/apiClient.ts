@@ -297,6 +297,17 @@ class APIClient {
     return res.data;
   }
 
+  // Public Stats (no auth required)
+  public async getPublicStats() {
+    const res = await this.request<{ success: boolean; data: any }>('/api/public/stats');
+    return res.data;
+  }
+
+  public async getPublicLatest() {
+    const res = await this.request<{ success: boolean; data: any[] }>('/api/public/latest');
+    return res.data;
+  }
+
   public async getTrends() {
     const res = await this.request<{ success: boolean; data: any }>('/api/intelligence/trends');
     return res.data;
@@ -368,20 +379,6 @@ class APIClient {
   public async getGeoAnalyticsHotspots() {
     const res = await this.request<{ success: boolean; data: any[] }>('/api/geoanalytics/hotspots');
     return res.data;
-  }
-
-  // Misc
-  public async getNotifications() {
-    const res = await this.request<{ success: boolean; data: Notification[]; unreadCount: number }>('/api/notifications');
-    return res;
-  }
-
-  public async markNotificationRead(id: string) {
-    return await this.request(`/api/notifications/${id}/read`, { method: 'PUT' });
-  }
-
-  public async markAllNotificationsRead() {
-    return await this.request('/api/notifications/read-all', { method: 'POST' });
   }
 
   public async submitFeedback(payload: { reportId?: string; incidentId?: string; rating: number; comments: string }) {
@@ -1082,6 +1079,13 @@ class APIClient {
   public async deleteNotification(id: string) {
     const res = await this.request<{ success: boolean }>(`/api/notifications/${encodeURIComponent(id)}`, {
       method: 'DELETE'
+    });
+    return res;
+  }
+
+  public async processScheduledNotifications() {
+    const res = await this.request<{ success: boolean; data: { processed: number } }>('/api/notifications/process-scheduled', {
+      method: 'POST'
     });
     return res;
   }

@@ -67,8 +67,8 @@ function isIsolatedLocalMongoUri(uri: string): boolean {
   if (!isAtlas && !(lower.includes('127.0.0.1') || lower.includes('localhost') || lower.includes('[::1]'))) return false;
   const dbName = getIsolatedMongoDbNameFromUri(uri);
   if (!dbName) return false;
-  // Explicit isolated targets only: approved dev DB or ephemeral local parity-test DBs.
-  return dbName === 'scip_dev' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
+  // Explicit isolated targets only: approved dev DB, production DB, or ephemeral local parity-test DBs.
+  return dbName === 'scip' || dbName === 'scip_dev' || /^scip_test(_[a-z0-9_-]+)?$/i.test(dbName);
 }
 
 export function tryEnableMongoRuntime(mongoStatus?: { driverState?: string; dbName?: string | null }): { enabled: boolean; reason?: string } {

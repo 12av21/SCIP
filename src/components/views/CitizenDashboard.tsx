@@ -71,10 +71,12 @@ export const CitizenDashboard: React.FC<CitizenDashboardProps> = ({
     try {
       const rep = await api.getReports({ myOnly: true });
       const inc = await api.getIncidents();
-      const notifRes = await api.getNotifications().catch(() => null);
+      const notifRes = await api.getNotifications({ limit: 10 }).catch(() => null);
+      const unreadRes = await api.getUnreadCount().catch(() => null);
       setReports(rep || []);
       setIncidents(inc || []);
-      if (notifRes) { setNotifications(notifRes.data || []); setUnreadCount(notifRes.unreadCount || 0); }
+      if (notifRes && notifRes.success) { setNotifications(notifRes.data || []); }
+      if (unreadRes && unreadRes.success) { setUnreadCount(unreadRes.data?.unread || 0); }
     } catch (err: any) {
       setLoadError(err?.message || 'Failed to load dashboard data. Please retry.');
     } finally {

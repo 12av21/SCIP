@@ -33,6 +33,8 @@ export type UserPermission =
   | 'model.evaluate'
   | 'data.export'
   | 'admin.manage'
+  | 'notification.send'
+  | 'notification.manage'
   // India location & geospatial permissions
   | 'location.read'
   | 'location.manage'
